@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import WorkoutPhotos from '../progress/WorkoutPhotos';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   Alert,
@@ -22,6 +23,7 @@ import {
   saveWorkoutHistory as persistWorkoutHistory,
 } from '../../services/workout-history-storage';
 import { WorkoutExercise } from '../../types/workout';
+import { createUserContextSnapshot } from '../../services/user-context-snapshot';
 
 import {
   WorkoutHistoryEntry,
@@ -54,6 +56,8 @@ type ExerciseSelection = {
 };
 
 export default function WorkoutScreen() {
+  const savingWorkout = useRef(false);
+  const [completedWorkout, setCompletedWorkout] = useState<WorkoutHistoryEntry | null>(null);
   const [profileId, setProfileId] =
     useState('');
   const [startedAt, setStartedAt] =
@@ -689,7 +693,12 @@ export default function WorkoutScreen() {
    * SAVE WORKOUT
    */
 
-  const saveWorkoutToHistory = () => {
+  const saveWorkoutToHistory = async () => {
+    if (savingWorkout.current) return;
+    if (!historyLoaded || !profileId) {
+      Alert.alert('Please wait', 'Your profile and workout history are still loading.');
+      return;
+    }
     if (exercises.length === 0) {
       resetWorkoutState();
       return;
@@ -752,14 +761,20 @@ export default function WorkoutScreen() {
           ),
       };
 
-    setHistory(
-      (current) => [
-        entry,
-        ...current,
-      ]
-    );
-
-    resetWorkoutState();
+    savingWorkout.current = true;
+    try {
+      const completedEntry = { ...entry, userContext: await createUserContextSnapshot(profileId) };
+      const updated = [completedEntry, ...history];
+      await persistWorkoutHistory(profileId, updated);
+      setHistory(updated);
+      setCompletedWorkout(completedEntry);
+      resetWorkoutState();
+    } catch (error) {
+      console.error('Failed to finish workout:', error);
+      Alert.alert('Workout not saved', 'Your workout is still open. Please try Finish again.');
+    } finally {
+      savingWorkout.current = false;
+    }
   };
 
   /*
@@ -767,46 +782,57 @@ export default function WorkoutScreen() {
    */
 
   const finishWorkout = () => {
-    Alert.alert(
-      'Workout Complete',
-      [
-        `${exercises.length} exercises`,
-        `${completedSets} completed sets`,
-        `${Math.round(
-          totalVolume
-        ).toLocaleString()} lb total volume`,
-        `Duration ${formatTime(
-          elapsedSeconds
-        )}`,
-        profileWeightLb > 0
-          ? `${estimatedCalories} estimated calories burned`
-          : 'Add your profile weight to estimate calories',
-        prSetIds.length > 0
-          ? `${prSetIds.length} new PR${
-              prSetIds.length === 1
-                ? ''
-                : 's'
-            }`
-          : 'No new PRs',
-      ].join('\n'),
-      [
-        {
-          text:
-            'Keep Training',
+    const unfinishedItems = exercises
+      .map((exercise) => {
+        const remainingSets = exercise.sets.filter(
+          (set) => !set.completed
+        ).length;
 
-          style:
-            'cancel',
-        },
+        if (remainingSets === 0) {
+          return null;
+        }
 
-        {
-          text:
-            'Finish & Save',
+        return `• ${exercise.name}: ${remainingSets} ${
+          remainingSets === 1 ? 'set' : 'sets'
+        } left`;
+      })
+      .filter((item): item is string => Boolean(item));
 
-          onPress:
-            saveWorkoutToHistory,
-        },
-      ]
-    );
+    if (exercises.length === 0) {
+      unfinishedItems.push('• No exercises have been added');
+    }
+
+    if (unfinishedItems.length === 0) {
+      saveWorkoutToHistory();
+      return;
+    }
+
+    const message = [
+      'This is still left:',
+      '',
+      ...unfinishedItems,
+      '',
+      'Are you done and ready to finish anyway?',
+    ].join('\n');
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(message)) {
+        saveWorkoutToHistory();
+      }
+      return;
+    }
+
+    Alert.alert('Are you done?', message, [
+      {
+        text: 'Continue Workout',
+        style: 'cancel',
+      },
+      {
+        text: 'Finish Anyway',
+        style: 'destructive',
+        onPress: saveWorkoutToHistory,
+      },
+    ]);
   };
 
   /*
@@ -1261,6 +1287,17 @@ export default function WorkoutScreen() {
             ›
           </Text>
         </Pressable>
+
+        {completedWorkout && (
+          <View style={{ backgroundColor: colors.surface, padding: 18, borderRadius: 20, marginBottom: 20 }}>
+            <Text style={{ fontSize: 20, fontWeight: '900', color: colors.text }}>Workout saved!</Text>
+            <Text style={{ marginTop: 5, color: colors.muted }}>Add a progress photo. Find it later with this workout in Progress.</Text>
+            <WorkoutPhotos profileId={completedWorkout.profileId} workoutId={completedWorkout.id} />
+            <Pressable onPress={() => setCompletedWorkout(null)} style={{ paddingVertical: 14 }}>
+              <Text style={{ fontWeight: '800', color: colors.muted }}>Done</Text>
+            </Pressable>
+          </View>
+        )}
 
         <WorkoutPlanner
           plans={

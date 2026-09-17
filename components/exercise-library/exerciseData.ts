@@ -1,4 +1,4 @@
-import exercisesJson from '../../assets/exercises/exercises.json';
+import exercisesJson from '../../assets/exercises/exercises.en.json';
 import { hammerStrengthExercises } from './hammerStrengthData';
 
 export type LocalizedText = {
@@ -58,46 +58,28 @@ export const exercises = [
   ...hammerStrengthExercises,
 ];
 
-export function searchExercises(
-  query: string
-) {
-  const normalized =
-    query.trim().toLowerCase();
-
-  if (!normalized) {
-    return exercises;
-  }
-
-  return exercises.filter(
-    (exercise) => {
-      const searchableText = [
-        exercise.name,
-        exercise.category,
-        exercise.body_part,
-        exercise.target,
-        exercise.muscle_group,
-        exercise.equipment,
-        ...(exercise.secondary_muscles ??
-          []),
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-
-      return searchableText.includes(
-        normalized
-      );
-    }
-  );
+// Build immutable lookup data once instead of allocating strings per keystroke.
+const searchIndex = exercises.map((exercise) => ({
+  exercise,
+  text: Array.from(new Set([
+    exercise.name, exercise.category, exercise.body_part, exercise.target,
+    exercise.muscle_group, exercise.equipment, ...(exercise.secondary_muscles ?? []),
+  ].filter((value): value is string => Boolean(value))
+    .map((value) => value.trim().toLowerCase()))).join(' '),
+}));
+const exercisesById = new Map<string, ExerciseRecord>();
+for (const exercise of exercises) {
+  if (!exercisesById.has(exercise.id)) exercisesById.set(exercise.id, exercise);
 }
 
-export function getExerciseById(
-  id: string
-) {
-  return exercises.find(
-    (exercise) =>
-      exercise.id === id
-  );
+export function searchExercises(query: string) {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return exercises;
+  return searchIndex.filter((entry) => entry.text.includes(normalized)).map((entry) => entry.exercise);
+}
+
+export function getExerciseById(id: string) {
+  return exercisesById.get(id);
 }
 
 export function getEnglishInstructions(

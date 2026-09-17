@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import {
   Alert,
+  Image,
   Keyboard,
   Platform,
   Pressable,
@@ -13,6 +14,8 @@ import {
 } from 'react-native';
 
 import { router } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
+import { Directory, File, Paths } from 'expo-file-system';
 
 import { colors } from '../../constants/theme';
 import {
@@ -234,6 +237,36 @@ export default function ProfileScreen() {
    * HEIGHT
    */
 
+  const pickAvatar = async () => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Photo Permission Needed', 'Allow photo access to choose a profile picture.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+      if (result.canceled || !result.assets[0]) return;
+
+      const directory = new Directory(Paths.document, 'fittrack-avatars');
+      directory.create({ idempotent: true, intermediates: true });
+      const source = new File(result.assets[0].uri);
+      const destination = new File(
+        directory,
+        `${profile.id || 'profile'}-${Date.now()}${source.extension || '.jpg'}`
+      );
+      source.copy(destination);
+      const savedProfile = await persistProfile({ ...profile, avatarUri: destination.uri });
+      setProfile(savedProfile);
+    } catch (error) {
+      console.error('Failed to save profile photo:', error);
+      Alert.alert('Photo Save Failed', 'Your profile picture could not be saved. Please try again.');
+    }
+  };
   const heightFeet =
     Number(profile.heightFeet.replace(',', '.')) || 0;
   const heightRemainderInches =
@@ -504,19 +537,18 @@ export default function ProfileScreen() {
           styles.avatarCard
         }
       >
-        <View
-          style={
-            styles.avatar
-          }
-        >
-          <Text
-            style={
-              styles.avatarText
-            }
-          >
-            👤
+        <Pressable style={styles.avatar} onPress={pickAvatar} accessibilityRole="button" accessibilityLabel="Choose profile picture">
+          {profile.avatarUri ? (
+            <Image source={{ uri: profile.avatarUri }} style={styles.avatarImage} />
+          ) : (
+            <Text style={styles.avatarText}>👤</Text>
+          )}
+        </Pressable>
+        <Pressable style={styles.avatarButton} onPress={pickAvatar}>
+          <Text style={styles.avatarButtonText}>
+            {profile.avatarUri ? 'Change photo' : 'Add profile photo'}
           </Text>
-        </View>
+        </Pressable>
 
         <Text
           style={
@@ -1643,9 +1675,16 @@ const styles =
       justifyContent: 'center',
     },
 
-    avatarText: {
-      fontSize: 40,
+    avatarImage: { width: '100%', height: '100%', borderRadius: 44 },
+    avatarText: { fontSize: 40 },
+    avatarButton: {
+      marginTop: 10,
+      backgroundColor: colors.text,
+      borderRadius: 999,
+      paddingHorizontal: 18,
+      paddingVertical: 9,
     },
+    avatarButtonText: { color: colors.surface, fontSize: 12, fontWeight: '900' },
 
     profileName: {
       marginTop: 14,

@@ -8,21 +8,62 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 
 import { colors } from '../constants/theme';
+import { createFitTrackExport } from '../services/data-export';
+import { shareExportFile } from '../services/export-file';
 import {
   loadPhonePedometerEnabled,
   savePhonePedometerEnabled,
 } from '../services/health-connection-storage';
+import { loadProfile } from '../services/profile-storage';
+import {
+  loadRunNotificationDistance,
+  saveRunNotificationDistance,
+} from '../services/run-notification-settings';
 
 export default function SettingsScreen() {
   const [phoneConnected, setPhoneConnected] = useState(false);
+  const [profileId, setProfileId] = useState('');
+  const [runNoticeMiles, setRunNoticeMiles] = useState<number | null>(1);
+  const [customDistance, setCustomDistance] = useState('');
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
-    void loadPhonePedometerEnabled().then(setPhoneConnected);
+    const loadSettings = async () => {
+      const [connected, profile] = await Promise.all([
+        loadPhonePedometerEnabled(),
+        loadProfile(),
+      ]);
+      setPhoneConnected(connected);
+      if (profile?.id) {
+        setProfileId(profile.id);
+        setRunNoticeMiles(await loadRunNotificationDistance(profile.id));
+      }
+    };
+    void loadSettings();
   }, []);
+
+  const chooseRunNoticeDistance = async (distanceMiles: number | null) => {
+    if (!profileId) {
+      Alert.alert('Save Your Profile', 'Save your Profile before changing run notifications.');
+      return;
+    }
+    setRunNoticeMiles(await saveRunNotificationDistance(profileId, distanceMiles));
+  };
+
+  const saveCustomRunDistance = async () => {
+    const distance = Number(customDistance);
+    if (!Number.isFinite(distance) || distance < 0.1 || distance > 26.2) {
+      Alert.alert('Invalid Distance', 'Enter a distance from 0.1 to 26.2 miles.');
+      return;
+    }
+    await chooseRunNoticeDistance(distance);
+    setCustomDistance('');
+  };
 
   const togglePhonePedometer = async () => {
     if (phoneConnected) {
@@ -58,6 +99,32 @@ export default function SettingsScreen() {
     }
   };
 
+  const exportData = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const file = await createFitTrackExport();
+      await shareExportFile(file.filename, file.contents);
+    } catch (error) {
+      console.error('Failed to export FitTrack data:', error);
+      Alert.alert('Export failed', error instanceof Error ? error.message : 'Please try again.');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const confirmExport = () => {
+    const message = 'The export contains personal health, nutrition, and exercise data. Share it only where you choose.';
+    if (Platform.OS === 'web') {
+      if (window.confirm(message)) void exportData();
+      return;
+    }
+    Alert.alert('Export private FitTrack data?', message, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Create File', onPress: () => void exportData() },
+    ]);
+  };
+
   const explainWearableConnection = () => {
     const source = Platform.OS === 'ios' ? 'Apple Health' : 'Health Connect';
     Alert.alert(
@@ -83,6 +150,82 @@ export default function SettingsScreen() {
 
         <Text style={styles.title}>Settings</Text>
         <View style={styles.headerSpacer} />
+      </View>
+
+      <Text style={styles.sectionTitle}>Run notifications</Text>
+      <Text style={styles.sectionIntro}>
+        Choose how often FitTrack alerts you during a GPS run. This preference is saved to your Profile.
+      </Text>
+      <View style={styles.connectionCard}>
+        <Text style={styles.cardTitle}>Distance alert</Text>
+        <Text style={styles.body}>
+          {runNoticeMiles === null
+            ? 'Distance notifications are off.'
+            : `Notify every ${runNoticeMiles} mile${runNoticeMiles === 1 ? '' : 's'}.`}
+        </Text>
+        <View style={styles.distanceOptions}>
+          {[0.25, 0.5, 1, 2, 5].map((distance) => (
+            <Pressable
+              key={distance}
+              style={[
+                styles.distanceButton,
+                runNoticeMiles === distance && styles.distanceButtonSelected,
+              ]}
+              onPress={() => void chooseRunNoticeDistance(distance)}
+            >
+              <Text style={[
+                styles.distanceButtonText,
+                runNoticeMiles === distance && styles.distanceButtonTextSelected,
+              ]}>
+                {distance} mi
+              </Text>
+            </Pressable>
+          ))}
+          <Pressable
+            style={[styles.distanceButton, runNoticeMiles === null && styles.distanceButtonSelected]}
+            onPress={() => void chooseRunNoticeDistance(null)}
+          >
+            <Text style={[
+              styles.distanceButtonText,
+              runNoticeMiles === null && styles.distanceButtonTextSelected,
+            ]}>Off</Text>
+          </Pressable>
+        </View>
+        <Text style={styles.customLabel}>CUSTOM MILES</Text>
+        <View style={styles.customRow}>
+          <TextInput
+            value={customDistance}
+            onChangeText={(value) => setCustomDistance(value.replace(/[^0-9.]/g, ''))}
+            placeholder="Example: 0.75"
+            placeholderTextColor={colors.lightMuted}
+            keyboardType="decimal-pad"
+            returnKeyType="done"
+            onSubmitEditing={() => void saveCustomRunDistance()}
+            style={styles.customInput}
+          />
+          <Pressable style={styles.customSaveButton} onPress={() => void saveCustomRunDistance()}>
+            <Text style={styles.customSaveText}>Save</Text>
+          </Pressable>
+        </View>
+      </View>
+
+      <Text style={styles.sectionTitle}>Your data</Text>
+      <Text style={styles.sectionIntro}>
+        Create a readable JSON file containing your FitTrack profile, meals, workouts, activities, steps, vitamins, and preferences. You can attach this file to ChatGPT.
+      </Text>
+      <View style={styles.connectionCard}>
+        <Text style={styles.cardTitle}>Export for ChatGPT</Text>
+        <Text style={styles.body}>
+          Workout photo files and your profile picture are not included. The file still contains private health data.
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          disabled={exporting}
+          style={[styles.connectButton, exporting && styles.disabledButton]}
+          onPress={confirmExport}
+        >
+          <Text style={styles.connectButtonText}>{exporting ? 'Preparing file…' : 'Export My Data'}</Text>
+        </Pressable>
       </View>
 
       <Text style={styles.sectionTitle}>Health connections</Text>
@@ -212,6 +355,50 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     color: colors.muted,
   },
+  distanceOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 16,
+  },
+  distanceButton: {
+    minWidth: 70,
+    minHeight: 44,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.soft2,
+  },
+  distanceButtonSelected: { backgroundColor: colors.text },
+  distanceButtonText: { color: colors.text, fontSize: 13, fontWeight: '900' },
+  distanceButtonTextSelected: { color: colors.surface },
+  customLabel: {
+    marginTop: 18,
+    marginBottom: 7,
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 1,
+    color: colors.lightMuted,
+  },
+  customRow: { flexDirection: 'row', gap: 10 },
+  customInput: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 13,
+    paddingHorizontal: 13,
+    backgroundColor: colors.soft2,
+    color: colors.text,
+    fontWeight: '800',
+  },
+  customSaveButton: {
+    minWidth: 82,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.text,
+  },
+  customSaveText: { color: colors.surface, fontSize: 13, fontWeight: '900' },
   connectionCard: {
     backgroundColor: colors.surface,
     borderRadius: 20,
@@ -248,6 +435,7 @@ const styles = StyleSheet.create({
   disconnectButton: {
     backgroundColor: colors.muted,
   },
+  disabledButton: { opacity: 0.55 },
   connectButtonText: {
     color: colors.surface,
     fontSize: 14,

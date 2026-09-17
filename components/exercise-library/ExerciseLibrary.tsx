@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useDeferredValue, useMemo, useState } from 'react';
 import {
   Image,
   Pressable,
@@ -11,6 +11,8 @@ import {
 
 import { colors } from '../../constants/theme';
 import ExerciseDetail from './ExerciseDetail';
+import InteractiveMuscleMap, { MuscleFocusLabel } from './InteractiveMuscleMap';
+import { getExerciseImage } from './exerciseMedia';
 
 import {
   ExerciseRecord,
@@ -31,8 +33,6 @@ type Props = {
   ) => void;
 };
 
-const muscleMapImage = require('../../assets/images/exercise-library/muscle-map.png');
-
 const muscleFocusOptions = [
   { label: 'Chest', terms: ['chest', 'pectorals'] },
   { label: 'Back', terms: ['back', 'lats', 'latissimus', 'rhomboids', 'traps', 'trapezius'] },
@@ -46,6 +46,8 @@ const muscleFocusOptions = [
   { label: 'Hamstrings', terms: ['hamstrings'] },
   { label: 'Calves', terms: ['calves', 'soleus', 'lower legs'] },
 ] as const;
+
+type MuscleLabel = MuscleFocusLabel;
 
 function exerciseMatchesMuscle(
   exercise: ExerciseRecord,
@@ -69,10 +71,40 @@ function exerciseMatchesMuscle(
   return option.terms.some((term) => muscleText.includes(term));
 }
 
+function uniqueExerciseSummary(exercise: ExerciseRecord) {
+  return Array.from(
+    new Map(
+      [exercise.target, exercise.body_part, exercise.category, exercise.equipment]
+        .filter((value): value is string => Boolean(value))
+        .map((value) => [value.trim().toLowerCase(), value])
+    ).values()
+  );
+}
+function ExerciseThumbnail({ exercise }: { exercise: ExerciseRecord }) {
+  const source = getExerciseImage(exercise.id);
+
+  if (!source) {
+    return (
+      <View accessibilityLabel="No exercise image available" style={styles.thumbnailFallback}>
+        <Text style={styles.thumbnailFallbackText}>FIT</Text>
+      </View>
+    );
+  }
+
+  return (
+    <Image
+      accessibilityLabel={`${exercise.name} demonstration`}
+      resizeMode="contain"
+      source={source}
+      style={styles.exerciseThumbnail}
+    />
+  );
+}
 export default function ExerciseLibrary({
   onSelectExercise,
 }: Props) {
   const [query, setQuery] = useState('');
+  const deferredQuery = useDeferredValue(query);
 
   const [selectedEquipment, setSelectedEquipment] =
     useState<string | null>(null);
@@ -83,8 +115,16 @@ export default function ExerciseLibrary({
   const [selectedExercise, setSelectedExercise] =
     useState<ExerciseRecord | null>(null);
 
+  const toggleMuscle = (muscle: MuscleLabel) => {
+    setSelectedMuscles((current) =>
+      current.includes(muscle)
+        ? current.filter((item) => item !== muscle)
+        : [...current, muscle]
+    );
+  };
+
   const filteredExercises = useMemo(() => {
-    let results = searchExercises(query);
+    let results = searchExercises(deferredQuery);
 
     if (selectedEquipment) {
       results = results.filter(
@@ -102,7 +142,7 @@ export default function ExerciseLibrary({
     }
 
     return results.slice(0, 100);
-  }, [query, selectedEquipment, selectedMuscles]);
+  }, [deferredQuery, selectedEquipment, selectedMuscles]);
 
   const equipmentOptions = useMemo(() => {
     const options = exercises
@@ -160,16 +200,6 @@ export default function ExerciseLibrary({
         Search {exercises.length} exercises
       </Text>
 
-      <TextInput
-        value={query}
-        onChangeText={setQuery}
-        placeholder="Search exercises, muscles, or equipment"
-        placeholderTextColor={
-          colors.lightMuted
-        }
-        style={styles.searchInput}
-      />
-
       <View style={styles.musclePickerCard}>
         <View style={styles.musclePickerHeader}>
           <View style={{ flex: 1 }}>
@@ -188,12 +218,12 @@ export default function ExerciseLibrary({
           ) : null}
         </View>
 
-        <Image
-          source={muscleMapImage}
-          resizeMode="contain"
-          style={styles.muscleMap}
-          accessibilityLabel="Front and back muscle map"
-        />
+        <View style={styles.muscleMapFrame}>
+          <InteractiveMuscleMap
+            selectedMuscles={selectedMuscles as MuscleFocusLabel[]}
+            onToggleMuscle={toggleMuscle}
+          />
+        </View>
 
         <View style={styles.muscleChipGrid}>
           {muscleFocusOptions.map((muscle) => {
@@ -207,13 +237,7 @@ export default function ExerciseLibrary({
                   styles.muscleChip,
                   selected && styles.muscleChipSelected,
                 ]}
-                onPress={() =>
-                  setSelectedMuscles((current) =>
-                    selected
-                      ? current.filter((item) => item !== muscle.label)
-                      : [...current, muscle.label]
-                  )
-                }
+                onPress={() => toggleMuscle(muscle.label)}
               >
                 <Text
                   style={[
@@ -228,6 +252,17 @@ export default function ExerciseLibrary({
           })}
         </View>
       </View>
+
+      <TextInput
+        value={query}
+        onChangeText={setQuery}
+        placeholder="Search exercises, muscles, or equipment"
+        placeholderTextColor={
+          colors.lightMuted
+        }
+        style={styles.searchInput}
+      />
+
 
       <ScrollView
         horizontal
@@ -300,42 +335,59 @@ export default function ExerciseLibrary({
         {filteredExercises.length} shown
       </Text>
 
-      {filteredExercises.map(
-        (exercise) => (
-          <Pressable
-            key={exercise.id}
-            style={styles.exerciseCard}
-            onPress={() =>
-              setSelectedExercise(exercise)
-            }
-          >
-            <View style={{ flex: 1 }}>
-              <Text
-                style={styles.exerciseName}
-              >
+      <ScrollView
+        contentContainerStyle={styles.exerciseListContent}
+        keyboardShouldPersistTaps="handled"
+        nestedScrollEnabled
+        showsVerticalScrollIndicator
+        style={styles.exerciseList}
+      >
+        {filteredExercises.map(
+          (exercise) => (
+          <View key={exercise.id} style={styles.exerciseCard}>
+            <ExerciseThumbnail exercise={exercise} />
+            <Pressable
+              accessibilityRole="button"
+              style={styles.exerciseSummary}
+              onPress={() => setSelectedExercise(exercise)}
+            >
+              <Text style={styles.exerciseName}>
                 {exercise.name}
               </Text>
 
-              <Text
-                style={styles.exerciseMeta}
-              >
-                {[
-                  exercise.target,
-                  exercise.body_part,
-                  exercise.category,
-                  exercise.equipment,
-                ]
-                  .filter(Boolean)
-                  .join(' • ')}
+              <Text style={styles.exerciseMeta}>
+                {uniqueExerciseSummary(exercise).join(' • ')}
               </Text>
-            </View>
+            </Pressable>
 
-            <Text style={styles.detailsText}>
-              View
-            </Text>
-          </Pressable>
-        )
-      )}
+            <View style={styles.exerciseActions}>
+              <Pressable
+                accessibilityLabel={`View ${exercise.name} details`}
+                accessibilityRole="button"
+                style={styles.viewButton}
+                onPress={() => setSelectedExercise(exercise)}
+              >
+                <Text style={styles.detailsText}>View</Text>
+              </Pressable>
+
+              <Pressable
+                accessibilityLabel={`Add ${exercise.name} to workout`}
+                accessibilityRole="button"
+                style={styles.quickAddButton}
+                onPress={() => onSelectExercise({
+                  exercise,
+                  sets: 3,
+                  reps: 10,
+                  restSeconds: 60,
+                })}
+              >
+                <Text style={styles.quickAddText}>Add</Text>
+              </Pressable>
+            </View>
+          </View>
+          )
+        )}
+      </ScrollView>
     </View>
   );
 }
@@ -362,6 +414,7 @@ const styles = StyleSheet.create({
   },
 
   searchInput: {
+    marginTop: 14,
     backgroundColor: colors.soft2,
     borderRadius: 12,
     paddingHorizontal: 14,
@@ -403,10 +456,10 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
 
-  muscleMap: {
+  muscleMapFrame: {
     alignSelf: 'center',
     width: '100%',
-    height: 270,
+    maxWidth: 360,
     marginTop: 10,
     borderRadius: 14,
   },
@@ -428,7 +481,7 @@ const styles = StyleSheet.create({
   },
 
   muscleChipSelected: {
-    backgroundColor: colors.text,
+    backgroundColor: '#B91C1C',
   },
 
   muscleChipText: {
@@ -475,6 +528,16 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
 
+  exerciseList: {
+    maxHeight: 420,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.soft2,
+  },
+
+  exerciseListContent: {
+    paddingBottom: 4,
+  },
+
   exerciseCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -482,6 +545,55 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
     borderTopWidth: 1,
     borderTopColor: colors.soft2,
+  },
+
+  exerciseThumbnail: {
+    backgroundColor: colors.soft2,
+    borderRadius: 10,
+    height: 64,
+    width: 64,
+  },
+
+  thumbnailFallback: {
+    alignItems: 'center',
+    backgroundColor: colors.soft2,
+    borderRadius: 10,
+    height: 64,
+    justifyContent: 'center',
+    width: 64,
+  },
+
+  thumbnailFallbackText: {
+    color: colors.lightMuted,
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  exerciseSummary: {
+    flex: 1,
+  },
+
+  exerciseActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
+  },
+
+  viewButton: {
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+  },
+
+  quickAddButton: {
+    backgroundColor: colors.text,
+    borderRadius: 10,
+    paddingHorizontal: 13,
+    paddingVertical: 9,
+  },
+
+  quickAddText: {
+    color: colors.surface,
+    fontWeight: '900',
   },
 
   exerciseName: {

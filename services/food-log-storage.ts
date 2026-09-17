@@ -1,3 +1,4 @@
+import { withStorageLock } from './storage-lock';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { FoodLogEntry } from '../types/foodLog';
@@ -16,6 +17,7 @@ async function loadAllFoodLogs() {
   }
 
   const parsed: unknown = JSON.parse(savedLogs);
+  if (!Array.isArray(parsed)) throw new Error('Saved collection is invalid; original data preserved.');
 
   return Array.isArray(parsed)
     ? (parsed as FoodLogEntry[])
@@ -25,47 +27,53 @@ async function loadAllFoodLogs() {
 export async function loadFoodLogs(
   profileId: string
 ) {
-  const logs = await loadAllFoodLogs();
+  return withStorageLock(FOOD_LOG_STORAGE_KEY, async () => {
+    const logs = await loadAllFoodLogs();
 
-  return logs.filter(
-    (entry) =>
-      entry.profileId === profileId
-  );
+    return logs.filter(
+      (entry) =>
+        entry.profileId === profileId
+    );
+  });
 }
 
 export async function addFoodLog(
   entry: FoodLogEntry
 ) {
-  const logs = await loadAllFoodLogs();
-  const updatedLogs = [...logs, entry];
+  return withStorageLock(FOOD_LOG_STORAGE_KEY, async () => {
+    const logs = await loadAllFoodLogs();
+    const updatedLogs = [...logs, entry];
 
-  await AsyncStorage.setItem(
-    FOOD_LOG_STORAGE_KEY,
-    JSON.stringify(updatedLogs)
-  );
+    await AsyncStorage.setItem(
+      FOOD_LOG_STORAGE_KEY,
+      JSON.stringify(updatedLogs)
+    );
 
-  return updatedLogs.filter(
-    (item) =>
-      item.profileId === entry.profileId
-  );
+    return updatedLogs.filter(
+      (item) =>
+        item.profileId === entry.profileId
+    );
+  });
 }
 
 export async function removeFoodLog(
   profileId: string,
   entryId: string
 ) {
-  const logs = await loadAllFoodLogs();
-  const updatedLogs = logs.filter(
-    (entry) => entry.id !== entryId
-  );
+  return withStorageLock(FOOD_LOG_STORAGE_KEY, async () => {
+    const logs = await loadAllFoodLogs();
+    const updatedLogs = logs.filter(
+      (entry) => entry.profileId !== profileId || entry.id !== entryId
+    );
 
-  await AsyncStorage.setItem(
-    FOOD_LOG_STORAGE_KEY,
-    JSON.stringify(updatedLogs)
-  );
+    await AsyncStorage.setItem(
+      FOOD_LOG_STORAGE_KEY,
+      JSON.stringify(updatedLogs)
+    );
 
-  return updatedLogs.filter(
-    (entry) =>
-      entry.profileId === profileId
-  );
+    return updatedLogs.filter(
+      (entry) =>
+        entry.profileId === profileId
+    );
+  });
 }

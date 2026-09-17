@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 import {
   Image,
+  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -20,6 +21,7 @@ import {
 import {
   getExerciseGif,
   getExerciseImage,
+  getExerciseProductUrl,
 } from './exerciseMedia';
 
 type Props = {
@@ -32,6 +34,26 @@ type Props = {
     restSeconds: number
   ) => void;
 };
+
+function getUniqueMetadata(exercise: ExerciseRecord) {
+  const seen = new Set<string>();
+
+  return [
+    { label: 'Target', value: exercise.target },
+    { label: 'Body', value: exercise.body_part },
+    { label: 'Category', value: exercise.category },
+    { label: 'Equipment', value: exercise.equipment },
+    { label: 'Muscle', value: exercise.muscle_group },
+  ].filter((item): item is { label: string; value: string } => {
+    if (!item.value) return false;
+
+    const normalized = item.value.trim().toLowerCase();
+    if (seen.has(normalized)) return false;
+
+    seen.add(normalized);
+    return true;
+  });
+}
 
 export default function ExerciseDetail({
   exercise,
@@ -55,8 +77,13 @@ export default function ExerciseDetail({
   const exerciseGif =
     getExerciseGif(exercise.id);
 
+  const productUrl =
+    getExerciseProductUrl(exercise.id);
+
   const mediaSource =
     exerciseGif || exerciseImage;
+
+  const metadata = getUniqueMetadata(exercise);
 
   const decreaseSets = () => {
     setSets((current) =>
@@ -194,59 +221,24 @@ export default function ExerciseDetail({
           </Text>
         </View>
 
+        {productUrl ? (
+          <Pressable
+            accessibilityRole="link"
+            style={styles.officialSourceButton}
+            onPress={() => void Linking.openURL(productUrl)}
+          >
+            <Text style={styles.officialSourceText}>Photo © Life Fitness · View official product</Text>
+          </Pressable>
+        ) : null}
+
         <View style={styles.metaWrap}>
-          {exercise.target ? (
-            <View style={styles.metaChip}>
-              <Text
-                style={styles.metaText}
-              >
-                Target: {exercise.target}
+          {metadata.map((item) => (
+            <View key={item.label} style={styles.metaChip}>
+              <Text style={styles.metaText}>
+                {item.label}: {item.value}
               </Text>
             </View>
-          ) : null}
-
-          {exercise.body_part ? (
-            <View style={styles.metaChip}>
-              <Text
-                style={styles.metaText}
-              >
-                Body: {exercise.body_part}
-              </Text>
-            </View>
-          ) : null}
-
-          {exercise.category ? (
-            <View style={styles.metaChip}>
-              <Text
-                style={styles.metaText}
-              >
-                Category:{' '}
-                {exercise.category}
-              </Text>
-            </View>
-          ) : null}
-
-          {exercise.equipment ? (
-            <View style={styles.metaChip}>
-              <Text
-                style={styles.metaText}
-              >
-                Equipment:{' '}
-                {exercise.equipment}
-              </Text>
-            </View>
-          ) : null}
-
-          {exercise.muscle_group ? (
-            <View style={styles.metaChip}>
-              <Text
-                style={styles.metaText}
-              >
-                Muscle:{' '}
-                {exercise.muscle_group}
-              </Text>
-            </View>
-          ) : null}
+          ))}
         </View>
 
         <View style={styles.setupSection}>
@@ -526,15 +518,14 @@ const styles = StyleSheet.create({
   },
 
   backButton: {
-    paddingVertical: 10,
-    marginBottom: 6,
+    alignSelf: 'flex-start',
+    backgroundColor: colors.text,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    marginBottom: 12,
   },
-
-  backText: {
-    color: colors.muted,
-    fontWeight: '800',
-    fontSize: 13,
-  },
+  backText: { color: colors.surface, fontWeight: '900', fontSize: 14 },
 
   card: {
     backgroundColor: colors.surface,
@@ -583,6 +574,23 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '900',
     color: colors.muted,
+  },
+
+  officialSourceButton: {
+    alignSelf: 'center',
+    minHeight: 38,
+    marginTop: 8,
+    paddingHorizontal: 13,
+    borderRadius: 12,
+    backgroundColor: colors.soft2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  officialSourceText: {
+    color: colors.muted,
+    fontSize: 10,
+    fontWeight: '800',
   },
 
   metaWrap: {

@@ -1,9 +1,10 @@
+import { useLocalDate } from './use-local-date';
 import { useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 import { Pedometer } from 'expo-sensors';
 
 import { loadSavedSteps, saveSteps } from '../services/step-storage';
-import { localDateKey, startOfLocalDay } from '../utils/date';
+import { startOfLocalDay } from '../utils/date';
 
 export type StepStatus =
   | 'checking'
@@ -12,6 +13,7 @@ export type StepStatus =
   | 'unavailable';
 
 export function useDailySteps(profileId: string, enabled: boolean) {
+  const date = useLocalDate();
   const [steps, setSteps] = useState(0);
   const [status, setStatus] = useState<StepStatus>('checking');
 
@@ -38,7 +40,6 @@ export function useDailySteps(profileId: string, enabled: boolean) {
           return;
         }
 
-        const date = localDateKey();
         let startingSteps = await loadSavedSteps(profileId, date);
 
         if (Platform.OS === 'ios') {
@@ -57,7 +58,7 @@ export function useDailySteps(profileId: string, enabled: boolean) {
           const updatedSteps = startingSteps + result.steps;
           if (mounted) setSteps(updatedSteps);
           if (Platform.OS === 'android') {
-            void saveSteps(profileId, date, updatedSteps);
+            void saveSteps(profileId, date, updatedSteps).catch((error) => console.error('Failed to save steps:', error));
           }
         });
       } catch (error) {
@@ -72,7 +73,7 @@ export function useDailySteps(profileId: string, enabled: boolean) {
       mounted = false;
       subscription?.remove();
     };
-  }, [enabled, profileId]);
+  }, [date, enabled, profileId]);
 
   return { steps, status };
 }

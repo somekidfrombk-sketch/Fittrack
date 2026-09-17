@@ -1,3 +1,5 @@
+import { hammerStrengthImages, hammerStrengthProductUrls } from './hammerStrengthMedia';
+
 export const exerciseImages: Record<string, any> = {
   '0001': require('../../assets/exercises/images/0001-2gPfomN.jpg'),
   '0002': require('../../assets/exercises/images/0002-Hy9D21L.jpg'),
@@ -2653,7 +2655,11 @@ export const exerciseGifs: Record<string, any> = {
 };
 
 export function getExerciseImage(id: string) {
-  return exerciseImages[id];
+  return exerciseImages[id] ?? hammerStrengthImages[id];
+}
+
+export function getExerciseProductUrl(id: string) {
+  return hammerStrengthProductUrls[id];
 }
 
 export function getExerciseGif(id: string) {

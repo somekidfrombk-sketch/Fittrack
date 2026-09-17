@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useLocalDate } from '../../hooks/use-local-date';
+import { useCallback, useDeferredValue, useMemo, useState } from 'react';
 import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import {
@@ -10,7 +11,7 @@ import * as ImagePicker from 'expo-image-picker';
 
 import usdaCatalog from '../../assets/data/usda-foods.json';
 import { colors } from '../../constants/theme';
-import { AiParsedFoodItem, parseFoodSearch } from '../../services/ai-food-search';
+import { addFoodFavorite, loadFoodFavorites, removeFoodFavorite } from '../../services/food-favorites-storage';
 import { addFoodLog, loadFoodLogs, removeFoodLog } from '../../services/food-log-storage';
 import { loadProfile } from '../../services/profile-storage';
 import {
@@ -20,11 +21,11 @@ import {
   savedProductToFood,
 } from '../../services/saved-barcode-products';
 import { lookupUsdaBarcode } from '../../services/usda-api';
-import { FoodLogEntry, MealType, SavedBarcodeProduct, UsdaFood } from '../../types/foodLog';
+import { FoodFavorite, FoodLogEntry, MealType, SavedBarcodeProduct, UsdaFood } from '../../types/foodLog';
 import { ProfileData } from '../../types/profile';
-import { localDateKey } from '../../utils/date';
 
 const foods = usdaCatalog.foods as UsdaFood[];
+const foodSearchIndex = foods.map((food) => ({ food, name: food.name.toLocaleLowerCase() }));
 const meals: { value: MealType; label: string }[] = [
   { value: 'breakfast', label: 'Breakfast' },
   { value: 'lunch', label: 'Lunch' },
@@ -39,49 +40,14 @@ const targetNumber = (value?: string) => {
 
 const roundMacro = (value: number) => Math.round(value * 10) / 10;
 
-const normalizeSearchWord = (value: string) => {
-  const word = value.toLocaleLowerCase().replace(/[^a-z0-9]/g, '');
-  return word.length > 3 && word.endsWith('s') ? word.slice(0, -1) : word;
-};
-
-const searchWords = (value: string) =>
-  value
-    .split(/\s+/)
-    .map(normalizeSearchWord)
-    .filter((word): word is string => word.length > 0);
-
-const findAiMatches = (item: AiParsedFoodItem) => {
-  const terms = [...new Set(searchWords(`${item.searchTerm} ${item.preparation}`))];
-  const brandTerms = [...new Set(searchWords(item.brand))];
-  const minimumMatches = Math.min(2, terms.length);
-
-  return foods
-    .map((food) => {
-      const nameWords = searchWords(food.name);
-      const matchedTerms = terms.filter((term) =>
-        nameWords.some(
-          (word) => word === term || word.startsWith(term) || term.startsWith(word)
-        )
-      );
-      const exactMatches = matchedTerms.filter((term) => nameWords.includes(term)).length;
-      const brandMatches = brandTerms.filter((term) => nameWords.includes(term)).length;
-      const score = matchedTerms.length * 4 + exactMatches * 2 + brandMatches;
-
-      return { food, score, matchedCount: matchedTerms.length };
-    })
-    .filter((result) => result.matchedCount >= minimumMatches)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 4)
-    .map((result) => result.food);
-};
-
 export default function FoodScreen() {
   const [profile, setProfile] = useState<Partial<ProfileData> | null>(null);
   const [logs, setLogs] = useState<FoodLogEntry[]>([]);
+  const [favorites, setFavorites] = useState<FoodFavorite[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState('');
-  const [aiItems, setAiItems] = useState<AiParsedFoodItem[]>([]);
-  const [aiSearching, setAiSearching] = useState(false);
+  const deferredQuery = useDeferredValue(query);
+  const [foodTab, setFoodTab] = useState<'search' | 'favorites'>('search');
   const [selectedFood, setSelectedFood] = useState<UsdaFood | null>(null);
   const [selectedMeal, setSelectedMeal] = useState<MealType>('breakfast');
   const [grams, setGrams] = useState('100');
@@ -112,12 +78,16 @@ export default function FoodScreen() {
       const loadData = async () => {
         try {
           const savedProfile = await loadProfile();
-          const savedLogs = savedProfile?.id
-            ? await loadFoodLogs(savedProfile.id)
-            : [];
+          const [savedLogs, savedFavorites] = savedProfile?.id
+            ? await Promise.all([
+                loadFoodLogs(savedProfile.id),
+                loadFoodFavorites(savedProfile.id),
+              ])
+            : [[], []];
           if (active) {
             setProfile(savedProfile);
             setLogs(savedLogs);
+            setFavorites(savedFavorites);
           }
         } catch (error) {
           console.error('Failed to load food data:', error);
@@ -133,7 +103,7 @@ export default function FoodScreen() {
     }, [])
   );
 
-  const today = localDateKey();
+  const today = useLocalDate();
   const todayLogs = useMemo(
     () => logs.filter((entry) => entry.date === today),
     [logs, today]
@@ -158,13 +128,15 @@ export default function FoodScreen() {
   };
 
   const searchResults = useMemo(() => {
-    const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+    const terms = deferredQuery.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
     if (terms.length === 0) return [];
-    return foods.filter((food) => {
-      const name = food.name.toLocaleLowerCase();
-      return terms.every((term) => name.includes(term));
-    }).slice(0, 20);
-  }, [query]);
+    const matches: UsdaFood[] = [];
+    for (const entry of foodSearchIndex) {
+      if (terms.every((term) => entry.name.includes(term))) matches.push(entry.food);
+      if (matches.length === 20) break;
+    }
+    return matches;
+  }, [deferredQuery]);
 
   const selectedNutrition = useMemo(() => {
     const gramWeight = Number(grams);
@@ -189,52 +161,25 @@ export default function FoodScreen() {
     setServingDescription(portion?.description ?? '100 g');
   };
 
-  const searchWithAi = async () => {
-    if (!query.trim()) {
-      Alert.alert('Describe Your Food', 'Type a food or meal before using AI search.');
+  const isFavorite = (foodId: string) =>
+    favorites.some((item) => item.food.id === foodId);
+
+  const toggleFavorite = async (food: UsdaFood) => {
+    if (!profile?.id) {
+      Alert.alert('Save Your Profile', 'Save your Profile before adding favorites.');
       return;
     }
-
-    setAiSearching(true);
-    setAiItems([]);
     try {
-      const parsedItems = await parseFoodSearch(query.trim());
-      setAiItems(parsedItems);
-      if (parsedItems.length === 0) {
-        Alert.alert('No Foods Found', 'Try describing the food in a different way.');
-      }
-    } catch (error) {
-      console.error('AI food search failed:', error);
-      Alert.alert(
-        'AI Search Unavailable',
-        error instanceof Error ? error.message : 'Try the regular USDA search instead.'
+      setFavorites(
+        isFavorite(food.id)
+          ? await removeFoodFavorite(profile.id, food.id)
+          : await addFoodFavorite(profile.id, food)
       );
-    } finally {
-      setAiSearching(false);
+    } catch (error) {
+      console.error('Failed to update favorite:', error);
+      Alert.alert('Favorite Not Saved', 'Please try again.');
     }
   };
-
-  const selectAiMatch = (food: UsdaFood, item: AiParsedFoodItem) => {
-    const requestedUnit = normalizeSearchWord(item.unit);
-    const matchingPortion = food.portions.find((portion) =>
-      portion.description
-        .split(/\s+/)
-        .map(normalizeSearchWord)
-        .includes(requestedUnit)
-    );
-    const portion = matchingPortion ?? food.portions[0];
-    const gramWeight = portion?.gramWeight ?? 100;
-    const quantity = Number.isFinite(item.quantity) && item.quantity > 0
-      ? item.quantity
-      : 1;
-
-    setSelectedFood(food);
-    setServingCount(String(quantity));
-    setPortionGramWeight(gramWeight);
-    setServingDescription(portion?.description ?? '100 g');
-    setGrams(String(roundMacro(gramWeight * quantity)));
-  };
-
   const logSelectedFood = async () => {
     if (!profile?.id) {
       Alert.alert('Save Your Profile', 'Save your Profile before logging food.');
@@ -282,6 +227,60 @@ export default function FoodScreen() {
     }
   };
 
+  const buildCustomFavorite = (): UsdaFood | null => {
+    const name = customName.trim();
+    const calories = Number(customCalories);
+    const protein = Number(customProtein || 0);
+    const carbs = Number(customCarbs || 0);
+    const fat = Number(customFat || 0);
+    if (!name) {
+      Alert.alert('Food Name Required', 'Enter a name before saving this favorite.');
+      return null;
+    }
+    if (![calories, protein, carbs, fat].every((value) => Number.isFinite(value) && value >= 0)) {
+      Alert.alert('Check Nutrition', 'Enter valid calories, protein, carbs, and fat.');
+      return null;
+    }
+    const enteredGrams = Number(customServingGrams);
+    const gramWeight = Number.isFinite(enteredGrams) && enteredGrams > 0 ? enteredGrams : 100;
+    const per100g = 100 / gramWeight;
+    const favoriteKey = `${customBrand}-${name}`
+      .toLocaleLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '');
+    return {
+      id: `custom-${favoriteKey}`,
+      name: customBrand.trim() ? `${customBrand.trim()} · ${name}` : name,
+      dataType: 'Custom food',
+      caloriesPer100g: calories * per100g,
+      proteinPer100g: protein * per100g,
+      carbsPer100g: carbs * per100g,
+      fatPer100g: fat * per100g,
+      portions: [{
+        amount: 1,
+        description: customServing.trim() || '1 serving',
+        gramWeight,
+      }],
+    };
+  };
+
+  const saveCustomFavorite = async () => {
+    if (!profile?.id) {
+      Alert.alert('Save Your Profile', 'Save your Profile before adding favorites.');
+      return;
+    }
+    const food = buildCustomFavorite();
+    if (!food) return;
+    try {
+      setFavorites(await addFoodFavorite(profile.id, food));
+      setFoodTab('favorites');
+      setShowCustomFood(false);
+      Alert.alert('Favorite Saved', `${food.name} was added to Favorite Foods.`);
+    } catch (error) {
+      console.error('Failed to save custom favorite:', error);
+      Alert.alert('Favorite Not Saved', 'Please try again.');
+    }
+  };
   const logCustomFood = async () => {
     if (!profile?.id) {
       Alert.alert('Save Your Profile', 'Save your Profile before logging food.');
@@ -615,73 +614,92 @@ export default function FoodScreen() {
 
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Add Food</Text>
-            <Pressable style={styles.scanButton} onPress={openScanner}>
-              <Text style={styles.scanButtonText}>▣ Scan Product Barcode</Text>
-            </Pressable>
-            <TextInput
-              value={query}
-              onChangeText={(value) => {
-                setQuery(value);
-                setAiItems([]);
-              }}
-              placeholder="Search a food or describe a meal"
-              placeholderTextColor={colors.lightMuted}
-              returnKeyType="search"
-              onSubmitEditing={searchWithAi}
-              style={styles.input}
-            />
-            <Pressable
-              disabled={aiSearching}
-              style={[styles.aiButton, aiSearching && styles.buttonDisabled]}
-              onPress={searchWithAi}
-            >
-              <Text style={styles.aiButtonText}>
-                {aiSearching ? 'Understanding meal…' : '✦ Search with AI'}
-              </Text>
-            </Pressable>
-            {aiItems.map((item, itemIndex) => {
-              const matches = findAiMatches(item);
-              return (
-                <View key={`${item.searchTerm}-${itemIndex}`} style={styles.aiGroup}>
-                  <Text style={styles.aiGroupTitle}>
-                    {item.quantity} {item.unit} · {item.searchTerm}
-                  </Text>
-                  {matches.length === 0 ? (
-                    <Text style={styles.helperText}>No matching USDA food found.</Text>
-                  ) : matches.map((food) => (
-                    <Pressable
-                      key={`${itemIndex}-${food.id}`}
-                      style={styles.searchResult}
-                      onPress={() => selectAiMatch(food, item)}
-                    >
+            <View style={styles.foodTabRow}>
+              <Pressable
+                style={[styles.foodTabButton, foodTab === 'search' && styles.foodTabButtonSelected]}
+                onPress={() => setFoodTab('search')}
+              >
+                <Text style={[styles.foodTabText, foodTab === 'search' && styles.foodTabTextSelected]}>Search</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.foodTabButton, foodTab === 'favorites' && styles.foodTabButtonSelected]}
+                onPress={() => {
+                  setFoodTab('favorites');
+                  setShowCustomFood(false);
+                  setScannerOpen(false);
+                }}
+              >
+                <Text style={[styles.foodTabText, foodTab === 'favorites' && styles.foodTabTextSelected]}>
+                  Favorites ({favorites.length})
+                </Text>
+              </Pressable>
+            </View>
+
+            {foodTab === 'search' ? (
+              <>
+                <Pressable style={styles.scanButton} onPress={openScanner}>
+                  <Text style={styles.scanButtonText}>▣ Scan Product Barcode</Text>
+                </Pressable>
+                <TextInput
+                  value={query}
+                  onChangeText={setQuery}
+                  placeholder="Search USDA foods"
+                  placeholderTextColor={colors.lightMuted}
+                  returnKeyType="search"
+                  style={styles.input}
+                />
+                {searchResults.map((food) => (
+                  <View key={food.id} style={styles.favoriteRow}>
+                    <Pressable style={[styles.searchResult, styles.favoriteFood]} onPress={() => selectFood(food)}>
                       <Text style={styles.foodName}>{food.name}</Text>
-                      <Text style={styles.foodMeta}>
-                        USDA · {Math.round(food.caloriesPer100g)} kcal per 100 g
+                      <Text style={styles.foodMeta}>{Math.round(food.caloriesPer100g)} kcal per 100 g</Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityLabel={`${isFavorite(food.id) ? 'Remove' : 'Add'} ${food.name} ${isFavorite(food.id) ? 'from' : 'to'} favorites`}
+                      style={styles.favoriteStarButton}
+                      onPress={() => void toggleFavorite(food)}
+                    >
+                      <Text style={[styles.favoriteStar, !isFavorite(food.id) && styles.favoriteStarEmpty]}>
+                        {isFavorite(food.id) ? '★' : '☆'}
                       </Text>
                     </Pressable>
-                  ))}
+                  </View>
+                ))}
+                {query.trim() && searchResults.length === 0 ? <Text style={styles.helperText}>No USDA foods found.</Text> : null}
+                <Pressable
+                  style={styles.customToggle}
+                  onPress={() => {
+                    setShowCustomFood((current) => !current);
+                    setSelectedFood(null);
+                    setPendingBarcode('');
+                  }}
+                >
+                  <Text style={styles.customToggleText}>
+                    {showCustomFood ? 'Hide Custom Food' : '+ Add Custom Food'}
+                  </Text>
+                </Pressable>
+              </>
+            ) : favorites.length === 0 ? (
+              <Text style={styles.emptyFavorites}>No favorites yet. Use Search or create a custom food, then tap the star.</Text>
+            ) : (
+              favorites.map((favorite) => (
+                <View key={favorite.id} style={styles.favoriteRow}>
+                  <Pressable style={styles.favoriteFood} onPress={() => selectFood(favorite.food)}>
+                    <Text style={styles.foodName}>{favorite.food.name}</Text>
+                    <Text style={styles.foodMeta}>
+                      {favorite.food.portions[0]?.description ?? '100 g'} · {Math.round(favorite.food.caloriesPer100g * ((favorite.food.portions[0]?.gramWeight ?? 100) / 100))} kcal
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityLabel={`Remove ${favorite.food.name} from favorites`}
+                    style={styles.favoriteStarButton}
+                    onPress={() => void toggleFavorite(favorite.food)}
+                  >
+                    <Text style={styles.favoriteStar}>★</Text>
+                  </Pressable>
                 </View>
-              );
-            })}
-            {searchResults.map((food) => (
-              <Pressable key={food.id} style={styles.searchResult} onPress={() => selectFood(food)}>
-                <Text style={styles.foodName}>{food.name}</Text>
-                <Text style={styles.foodMeta}>{Math.round(food.caloriesPer100g)} kcal per 100 g</Text>
-              </Pressable>
-            ))}
-            {query.trim() && searchResults.length === 0 ? <Text style={styles.helperText}>No USDA foods found.</Text> : null}
-            <Pressable
-              style={styles.customToggle}
-              onPress={() => {
-                setShowCustomFood((current) => !current);
-                setSelectedFood(null);
-                setPendingBarcode('');
-              }}
-            >
-              <Text style={styles.customToggleText}>
-                {showCustomFood ? 'Hide Custom Food' : '+ Add Custom Food'}
-              </Text>
-            </Pressable>
+              ))
+            )}
           </View>
 
           {scannerOpen ? (
@@ -776,6 +794,11 @@ export default function FoodScreen() {
                   </Pressable>
                 ))}
               </View>
+              {!pendingBarcode ? (
+                <Pressable style={styles.favoriteSaveButton} onPress={() => void saveCustomFavorite()}>
+                  <Text style={styles.favoriteSaveButtonText}>☆ Save to Favorites</Text>
+                </Pressable>
+              ) : null}
               <Pressable style={styles.addButton} onPress={pendingBarcode ? saveScannedProduct : logCustomFood}>
                 <Text style={styles.addButtonText}>
                   {pendingBarcode ? 'Save Product & Continue' : 'Add Custom Food'}
@@ -786,7 +809,18 @@ export default function FoodScreen() {
 
           {selectedFood ? (
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>{selectedFood.name}</Text>
+              <View style={styles.selectedFoodHeader}>
+                <Text style={[styles.cardTitle, styles.selectedFoodTitle]}>{selectedFood.name}</Text>
+                <Pressable
+                  accessibilityLabel={`${isFavorite(selectedFood.id) ? 'Remove from' : 'Add to'} favorites`}
+                  style={styles.favoriteStarButton}
+                  onPress={() => void toggleFavorite(selectedFood)}
+                >
+                  <Text style={[styles.favoriteStar, !isFavorite(selectedFood.id) && styles.favoriteStarEmpty]}>
+                    {isFavorite(selectedFood.id) ? '★' : '☆'}
+                  </Text>
+                </Pressable>
+              </View>
               <Text style={styles.smallHeading}>SERVING</Text>
               <View style={styles.optionWrap}>
                 <Pressable style={[styles.optionButton, servingDescription === '100 g' && styles.optionButtonSelected]} onPress={() => { setGrams('100'); setServingCount('1'); setPortionGramWeight(100); setServingDescription('100 g'); }}>
@@ -884,18 +918,26 @@ const styles = StyleSheet.create({
   macroRemaining: { marginTop: 9, fontSize: 11, color: colors.lightMuted },
   input: { backgroundColor: colors.soft2, borderRadius: 12, paddingHorizontal: 13, paddingVertical: 12, color: colors.text, fontWeight: '700' },
   searchResult: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.soft2 },
+  favoriteRow: { flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.soft2 },
+  favoriteFood: { flex: 1, paddingRight: 10 },
+  favoriteStarButton: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  favoriteStar: { color: '#F5A623', fontSize: 25, fontWeight: '900' },
+  favoriteStarEmpty: { color: colors.lightMuted },
+  selectedFoodHeader: { flexDirection: 'row', alignItems: 'flex-start' },
+  selectedFoodTitle: { flex: 1, paddingRight: 8 },
   foodName: { fontSize: 13, fontWeight: '800', color: colors.text },
   foodMeta: { marginTop: 3, fontSize: 11, color: colors.muted },
   helperText: { marginTop: 12, fontSize: 12, color: colors.lightMuted },
   customToggle: { marginTop: 14, backgroundColor: colors.soft2, borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
   customToggleText: { fontSize: 13, fontWeight: '900', color: colors.text },
+  foodTabRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
+  foodTabButton: { flex: 1, minHeight: 44, borderRadius: 12, backgroundColor: colors.soft2, alignItems: 'center', justifyContent: 'center' },
+  foodTabButtonSelected: { backgroundColor: colors.text },
+  foodTabText: { color: colors.muted, fontSize: 13, fontWeight: '900' },
+  foodTabTextSelected: { color: colors.surface },
+  emptyFavorites: { paddingVertical: 18, color: colors.muted, fontSize: 13, lineHeight: 19, textAlign: 'center' },
   scanButton: { marginBottom: 12, backgroundColor: colors.text, borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
   scanButtonText: { color: colors.surface, fontSize: 13, fontWeight: '900' },
-  aiButton: { marginTop: 10, backgroundColor: colors.soft, borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
-  aiButtonText: { color: colors.text, fontSize: 13, fontWeight: '900' },
-  buttonDisabled: { opacity: 0.55 },
-  aiGroup: { marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.soft2 },
-  aiGroupTitle: { fontSize: 12, fontWeight: '900', color: colors.text },
   scannerCard: { backgroundColor: colors.surface, borderRadius: 20, padding: 16, marginBottom: 14, overflow: 'hidden' },
   scannerTitle: { fontSize: 14, fontWeight: '900', color: colors.text, marginBottom: 12, textAlign: 'center' },
   camera: { height: 280, borderRadius: 16, overflow: 'hidden' },
@@ -921,7 +963,9 @@ const styles = StyleSheet.create({
   mealButtonText: { fontSize: 11, fontWeight: '800', color: colors.muted },
   mealButtonTextSelected: { color: colors.surface },
   previewText: { marginTop: 16, fontSize: 12, lineHeight: 18, color: colors.muted },
-  addButton: { marginTop: 16, backgroundColor: colors.text, borderRadius: 13, paddingVertical: 13, alignItems: 'center' },
+  favoriteSaveButton: { marginTop: 16, backgroundColor: colors.soft, borderRadius: 13, paddingVertical: 13, alignItems: 'center' },
+  favoriteSaveButtonText: { color: colors.text, fontWeight: '900', fontSize: 14 },
+  addButton: { marginTop: 10, backgroundColor: colors.text, borderRadius: 13, paddingVertical: 13, alignItems: 'center' },
   addButtonText: { color: colors.surface, fontWeight: '900', fontSize: 14 },
   logRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.soft2 },
   logDetails: { flex: 1 },

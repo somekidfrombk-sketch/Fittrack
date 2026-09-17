@@ -1,3 +1,5 @@
+import { UserContextSnapshot } from './userContext';
+
 export type WorkoutHistorySet = {
   id: string;
   weight: string;
@@ -34,6 +36,8 @@ export type WorkoutHistoryEntry = {
   intensity?: WorkoutIntensity;
 
   weightLbAtWorkout?: number;
+
+  userContext?: UserContextSnapshot;
 
   exercises: WorkoutHistoryExercise[];
 };

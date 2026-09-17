@@ -37,6 +37,12 @@ export type UsdaFood = {
   portions: UsdaFoodPortion[];
 };
 
+export type FoodFavorite = {
+  id: string;
+  profileId: string;
+  food: UsdaFood;
+  createdAt: string;
+};
 export type SavedBarcodeProduct = {
   id: string;
   profileId: string;

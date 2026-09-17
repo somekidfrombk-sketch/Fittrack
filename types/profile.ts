@@ -20,6 +20,7 @@ export type LossRate =
 export type ProfileData = {
   id: string;
   name: string;
+  avatarUri: string;
   gender: Gender;
   age: string;
   heightFeet: string;
@@ -41,6 +42,7 @@ export type ProfileData = {
 export const emptyProfile: ProfileData = {
   id: '',
   name: '',
+  avatarUri: '',
   gender: 'male',
   age: '',
   heightFeet: '',

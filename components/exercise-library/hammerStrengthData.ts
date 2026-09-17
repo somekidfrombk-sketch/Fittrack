@@ -105,6 +105,6 @@ export const hammerStrengthExercises: ExerciseRecord[] = machines.map(
         'Return slowly to the starting position while keeping control of the resistance.',
       ],
     },
-    attribution: 'Machine naming based on the official Hammer Strength catalog.',
+    attribution: 'Machine naming and product photo © Life Fitness / Hammer Strength. Photo loaded from the official Life Fitness catalog.',
   })
 );

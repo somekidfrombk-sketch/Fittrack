@@ -7,13 +7,13 @@
     "icon": "./assets/images/icon.png",
     "scheme": "fittrack",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.somekidfrombk.FitTrack",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
-      }
+      },
+      "buildNumber": "1"
     },
     "android": {
       "adaptiveIcon": {
@@ -22,7 +22,6 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "edgeToEdgeEnabled": true,
       "softwareKeyboardLayoutMode": "resize",
       "predictiveBackGestureEnabled": false,
       "permissions": [
@@ -38,15 +37,15 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow FitTrack to scan food barcodes.",
+          "cameraPermission": "Allow FitTrack to scan food barcodes and take workout progress photos.",
           "recordAudioAndroid": false
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow FitTrack to select product packaging photos.",
-          "cameraPermission": "Allow FitTrack to photograph product packaging and nutrition labels.",
+          "photosPermission": "Allow FitTrack to select profile, workout progress, and product photos.",
+          "cameraPermission": "Allow FitTrack to take workout progress and product photos.",
           "microphonePermission": false
         }
       ],
@@ -56,6 +55,13 @@
           "motionPermission": "Allow FitTrack to count your steps and estimate calories burned from walking."
         }
       ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow FitTrack to use your location while you track a run."
+        }
+      ],
+      "expo-notifications",
       [
         "expo-splash-screen",
         {
@@ -67,7 +73,12 @@
             "backgroundColor": "#000000"
           }
         }
-      ]
+      ],
+      "expo-font",
+      "expo-image",
+      "expo-sharing",
+      "expo-web-browser",
+      "expo-status-bar"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -84,6 +95,7 @@
     },
     "updates": {
       "url": "https://u.expo.dev/b53d1820-7bab-46fe-8dad-62544d3f5ab7"
-    }
+    },
+    "description": "Personal fitness, nutrition, workout, running, cycling, vitamin, and progress tracking."
   }
 }
