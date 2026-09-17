@@ -1,0 +1,84 @@
+name: Build FitTrack iOS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout FitTrack
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate iOS project
+        run: npx expo prebuild --platform ios --clean --no-install
+
+      - name: Install CocoaPods
+        working-directory: ios
+        run: pod install
+
+      - name: Show available schemes
+        run: |
+          echo "Available workspaces:"
+          find ios -name "*.xcworkspace"
+
+          echo "Available schemes:"
+          xcodebuild -workspace ios/*.xcworkspace -list
+
+      - name: Build unsigned iOS app
+        run: |
+          WORKSPACE=$(find ios -maxdepth 1 -name "*.xcworkspace" | head -1)
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+
+          echo "Using workspace: $WORKSPACE"
+          echo "Using scheme: $SCHEME"
+
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath "$RUNNER_TEMP/build" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Create unsigned IPA
+        run: |
+          APP=$(find "$RUNNER_TEMP/build/Build/Products/Release-iphoneos" \
+            -maxdepth 1 \
+            -name "*.app" \
+            -type d \
+            | head -1)
+
+          if [ -z "$APP" ]; then
+            echo "ERROR: FitTrack .app was not found."
+            exit 1
+          fi
+
+          echo "Found app: $APP"
+
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/ipa/Payload/"
+
+          cd "$RUNNER_TEMP/ipa"
+          zip -r "$GITHUB_WORKSPACE/FitTrack-unsigned.ipa" Payload
+
+      - name: Upload FitTrack IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: FitTrack-unsigned-iOS
+          path: FitTrack-unsigned.ipa
+          retention-days: 7
