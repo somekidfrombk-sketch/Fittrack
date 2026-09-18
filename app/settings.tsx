@@ -1,5 +1,7 @@
 import { router } from 'expo-router';
 import { Pedometer } from 'expo-sensors';
+import * as DocumentPicker from 'expo-document-picker';
+import { File } from 'expo-file-system';
 import { reloadAsync } from 'expo-updates';
 import { useEffect, useState } from 'react';
 import {
@@ -16,6 +18,7 @@ import {
 import { colors } from '../constants/theme';
 import { useAppleHealth } from '../hooks/use-apple-health';
 import type { ICloudBackupStatus } from '../types/icloudBackup';
+import { importFitTrackExport } from '../services/data-import';
 import { createFitTrackExport } from '../services/data-export';
 import {
   createICloudBackup,
@@ -39,6 +42,7 @@ export default function SettingsScreen() {
   const [runNoticeMiles, setRunNoticeMiles] = useState<number | null>(1);
   const [customDistance, setCustomDistance] = useState('');
   const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [backupBusy, setBackupBusy] = useState(false);
   const [backupStatus, setBackupStatus] = useState<ICloudBackupStatus>({
     available: false,
@@ -145,6 +149,63 @@ export default function SettingsScreen() {
     }
   };
 
+
+  const importDataFromFile = async () => {
+    if (importing) return;
+    setImporting(true);
+    try {
+      const picked = await DocumentPicker.getDocumentAsync({
+        type: 'application/json',
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+
+      if (picked.canceled) {
+        return;
+      }
+
+      const asset = picked.assets[0];
+      const contents = await new File(asset.uri).text();
+      const result = await importFitTrackExport(contents);
+      Alert.alert(
+        'Import complete',
+        `Imported ${result.importedWorkouts} workouts, ${result.importedFoodLogs} food logs, and ${result.importedSteps} step records. FitTrack will reload now.`,
+        [
+          {
+            text: 'Reload FitTrack',
+            onPress: () => {
+              void reloadAsync().catch(() =>
+                Alert.alert(
+                  'Restart FitTrack',
+                  'Close and reopen FitTrack to load your imported data.'
+                )
+              );
+            },
+          },
+        ]
+      );
+    } catch (error) {
+      console.error('Failed to import FitTrack data:', error);
+      Alert.alert(
+        'Import failed',
+        error instanceof Error ? error.message : 'Please choose a valid FitTrack export file.'
+      );
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const confirmImport = () => {
+    const message = 'Choose a FitTrack JSON export from this phone. Imported profile, settings, meals, workouts, runs, vitamins, and steps will replace matching FitTrack data on this phone.';
+    if (Platform.OS === 'web') {
+      if (window.confirm(message)) void importDataFromFile();
+      return;
+    }
+    Alert.alert('Import FitTrack data?', message, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Choose File', onPress: () => void importDataFromFile() },
+    ]);
+  };
   const backupToICloud = async () => {
     if (backupBusy) return;
     setBackupBusy(true);
@@ -365,6 +426,14 @@ export default function SettingsScreen() {
           onPress={confirmExport}
         >
           <Text style={styles.connectButtonText}>{exporting ? 'Preparing file…' : 'Export My Data'}</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          disabled={importing}
+          style={[styles.secondaryButton, importing && styles.disabledButton]}
+          onPress={confirmImport}
+        >
+          <Text style={styles.secondaryButtonText}>{importing ? 'Importing…' : 'Import From File'}</Text>
         </Pressable>
       </View>
 
@@ -592,6 +661,19 @@ const styles = StyleSheet.create({
   disabledButton: { opacity: 0.55 },
   connectButtonText: {
     color: colors.surface,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  secondaryButton: {
+    minHeight: 46,
+    marginTop: 10,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.soft2,
+  },
+  secondaryButtonText: {
+    color: colors.text,
     fontSize: 14,
     fontWeight: '900',
   },

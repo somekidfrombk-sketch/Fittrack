@@ -126,13 +126,6 @@ export default function ExerciseLibrary({
   const filteredExercises = useMemo(() => {
     let results = searchExercises(deferredQuery);
 
-    if (selectedEquipment) {
-      results = results.filter(
-        (exercise) =>
-          exercise.equipment === selectedEquipment
-      );
-    }
-
     if (selectedMuscles.length > 0) {
       results = results.filter((exercise) =>
         selectedMuscles.some((muscle) =>
@@ -141,8 +134,38 @@ export default function ExerciseLibrary({
       );
     }
 
+    if (selectedEquipment) {
+      results = results.filter(
+        (exercise) =>
+          exercise.equipment === selectedEquipment
+      );
+    }
+
     return results.slice(0, 100);
   }, [deferredQuery, selectedEquipment, selectedMuscles]);
+
+  const activeFilters = [
+    ...selectedMuscles.map((muscle) => ({
+      key: `muscle-${muscle}`,
+      label: muscle,
+      onClear: () => toggleMuscle(muscle as MuscleLabel),
+    })),
+    ...(selectedEquipment
+      ? [
+          {
+            key: `equipment-${selectedEquipment}`,
+            label: selectedEquipment,
+            onClear: () => setSelectedEquipment(null),
+          },
+        ]
+      : []),
+  ];
+
+  const clearAllFilters = () => {
+    setQuery('');
+    setSelectedMuscles([]);
+    setSelectedEquipment(null);
+  };
 
   const equipmentOptions = useMemo(() => {
     const options = exercises
@@ -211,6 +234,7 @@ export default function ExerciseLibrary({
           {selectedMuscles.length > 0 ? (
             <Pressable
               accessibilityRole="button"
+              style={styles.clearButton}
               onPress={() => setSelectedMuscles([])}
             >
               <Text style={styles.clearText}>Clear</Text>
@@ -260,9 +284,36 @@ export default function ExerciseLibrary({
         placeholderTextColor={
           colors.lightMuted
         }
+        returnKeyType="search"
         style={styles.searchInput}
       />
 
+      {activeFilters.length > 0 || query.trim() ? (
+        <View style={styles.activeFilterWrap}>
+          {activeFilters.map((filter) => (
+            <Pressable
+              key={filter.key}
+              accessibilityRole="button"
+              style={styles.activeFilterChip}
+              onPress={filter.onClear}
+            >
+              <Text style={styles.activeFilterText}>
+                {filter.label} ×
+              </Text>
+            </Pressable>
+          ))}
+
+          <Pressable
+            accessibilityRole="button"
+            style={styles.clearAllButton}
+            onPress={clearAllFilters}
+          >
+            <Text style={styles.clearAllText}>
+              Clear all
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <ScrollView
         horizontal
@@ -274,6 +325,8 @@ export default function ExerciseLibrary({
         }
       >
         <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ selected: selectedEquipment === null }}
           style={[
             styles.filterChip,
             selectedEquipment === null &&
@@ -290,7 +343,7 @@ export default function ExerciseLibrary({
                 styles.filterTextSelected,
             ]}
           >
-            All
+            All equipment
           </Text>
         </Pressable>
 
@@ -303,6 +356,8 @@ export default function ExerciseLibrary({
             return (
               <Pressable
                 key={equipment}
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
                 style={[
                   styles.filterChip,
                   selected &&
@@ -335,13 +390,18 @@ export default function ExerciseLibrary({
         {filteredExercises.length} shown
       </Text>
 
-      <ScrollView
-        contentContainerStyle={styles.exerciseListContent}
-        keyboardShouldPersistTaps="handled"
-        nestedScrollEnabled
-        showsVerticalScrollIndicator
-        style={styles.exerciseList}
-      >
+      <View style={styles.exerciseList}>
+        {filteredExercises.length === 0 ? (
+          <View style={styles.emptyResultsCard}>
+            <Text style={styles.emptyResultsTitle}>
+              No exercises match those filters
+            </Text>
+            <Text style={styles.emptyResultsText}>
+              Remove a filter or clear all to see more exercises.
+            </Text>
+          </View>
+        ) : null}
+
         {filteredExercises.map(
           (exercise) => (
           <View key={exercise.id} style={styles.exerciseCard}>
@@ -387,7 +447,7 @@ export default function ExerciseLibrary({
           </View>
           )
         )}
-      </ScrollView>
+      </View>
     </View>
   );
 }
@@ -449,8 +509,16 @@ const styles = StyleSheet.create({
     color: colors.muted,
   },
 
+  clearButton: {
+    minHeight: 36,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
   clearText: {
-    paddingVertical: 4,
     fontSize: 12,
     fontWeight: '900',
     color: colors.text,
@@ -467,12 +535,13 @@ const styles = StyleSheet.create({
   muscleChipGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 7,
+    gap: 8,
     marginTop: 10,
   },
 
   muscleChip: {
-    minHeight: 38,
+    minHeight: 40,
+    minWidth: 92,
     paddingHorizontal: 12,
     alignItems: 'center',
     justifyContent: 'center',
@@ -494,17 +563,58 @@ const styles = StyleSheet.create({
     color: colors.surface,
   },
 
+  activeFilterWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+
+  activeFilterChip: {
+    minHeight: 34,
+    paddingHorizontal: 11,
+    borderRadius: 999,
+    backgroundColor: colors.text,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  activeFilterText: {
+    color: colors.surface,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+
+  clearAllButton: {
+    minHeight: 34,
+    paddingHorizontal: 11,
+    borderRadius: 999,
+    backgroundColor: colors.soft2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  clearAllText: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+
   filterRow: {
     gap: 8,
     paddingTop: 12,
     paddingBottom: 12,
+    alignItems: 'center',
   },
 
   filterChip: {
+    minHeight: 38,
     backgroundColor: colors.soft2,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 13,
+    paddingVertical: 9,
     borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   filterChipSelected: {
@@ -529,13 +639,28 @@ const styles = StyleSheet.create({
   },
 
   exerciseList: {
-    maxHeight: 420,
     borderBottomWidth: 1,
     borderBottomColor: colors.soft2,
   },
 
-  exerciseListContent: {
-    paddingBottom: 4,
+  emptyResultsCard: {
+    backgroundColor: colors.soft2,
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 10,
+  },
+
+  emptyResultsTitle: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '900',
+  },
+
+  emptyResultsText: {
+    marginTop: 5,
+    color: colors.muted,
+    fontSize: 12,
+    lineHeight: 18,
   },
 
   exerciseCard: {

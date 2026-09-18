@@ -1,14 +1,94 @@
-import {
-  AuthorizationRequestStatus,
-  CategoryValueSleepAnalysis,
-  getMostRecentQuantitySample,
-  getRequestStatusForAuthorization,
-  isHealthDataAvailableAsync,
-  queryCategorySamples,
-  queryStatisticsForQuantity,
-  requestAuthorization,
-} from '@kingstinct/react-native-healthkit';
+declare const require: (
+  id: string
+) => HealthKitModule;
 
+type HealthKitModule = {
+  AuthorizationRequestStatus: {
+    shouldRequest: number;
+  };
+  CategoryValueSleepAnalysis: {
+    inBed: number;
+    awake: number;
+    asleepCore: number;
+    asleepDeep: number;
+    asleepREM: number;
+    asleep: number;
+  };
+  getMostRecentQuantitySample: (
+    type: string,
+    unit: string
+  ) => Promise<{
+    quantity: number;
+    endDate: Date | string;
+  } | null>;
+  getRequestStatusForAuthorization: (
+    request: { toRead: readonly string[] }
+  ) => Promise<number>;
+  isHealthDataAvailableAsync: () => Promise<boolean>;
+  queryCategorySamples: (
+    type: string,
+    options: {
+      filter: {
+        date: {
+          startDate: Date;
+          endDate: Date;
+        };
+      };
+      limit: number;
+      ascending: boolean;
+    }
+  ) => Promise<{
+    uuid: string;
+    startDate: Date | string;
+    endDate: Date | string;
+    value: number;
+  }[]>;
+  queryStatisticsForQuantity: (
+    type: string,
+    options: string[],
+    query: {
+      filter: {
+        date: {
+          startDate: Date;
+          endDate: Date;
+          strictStartDate: boolean;
+          strictEndDate: boolean;
+        };
+      };
+      unit: string;
+    }
+  ) => Promise<{
+    sumQuantity?: { quantity: number } | null;
+  }>;
+  requestAuthorization: (
+    request: { toRead: readonly string[] }
+  ) => Promise<boolean>;
+};
+
+let healthKitModule:
+  | HealthKitModule
+  | null
+  | undefined;
+
+function getHealthKitModule() {
+  if (healthKitModule !== undefined) {
+    return healthKitModule;
+  }
+
+  try {
+    healthKitModule = require(
+      '@kingstinct/react-native-healthkit'
+    );
+  } catch (error) {
+    console.warn(
+      'Apple Health native module is not available in this build:',
+      error
+    );
+    healthKitModule = null;
+  }
+
+  return healthKitModule;
+}
 import type {
   AppleHealthAuthorizationStatus,
   HeartRateSample,
@@ -33,19 +113,22 @@ function startOfToday() {
   return date;
 }
 
-function sleepStage(value: CategoryValueSleepAnalysis): SleepStage {
+function sleepStage(
+  value: number,
+  categories: HealthKitModule['CategoryValueSleepAnalysis']
+): SleepStage {
   switch (value) {
-    case CategoryValueSleepAnalysis.inBed:
+    case categories.inBed:
       return 'in-bed';
-    case CategoryValueSleepAnalysis.awake:
+    case categories.awake:
       return 'awake';
-    case CategoryValueSleepAnalysis.asleepCore:
+    case categories.asleepCore:
       return 'core';
-    case CategoryValueSleepAnalysis.asleepDeep:
+    case categories.asleepDeep:
       return 'deep';
-    case CategoryValueSleepAnalysis.asleepREM:
+    case categories.asleepREM:
       return 'rem';
-    case CategoryValueSleepAnalysis.asleep:
+    case categories.asleep:
       return 'asleep';
     default:
       return 'unknown';
@@ -94,16 +177,21 @@ function calculateLatestSleepDuration(sessions: SleepSession[]) {
 
 export async function getHealthAuthorizationStatus(): Promise<AppleHealthAuthorizationStatus> {
   try {
-    const available = await isHealthDataAvailableAsync();
+    const healthKit = getHealthKitModule();
+    if (!healthKit) {
+      return { available: false, requestNeeded: false, hasRequested: false, status: 'unavailable' };
+    }
+
+    const available = await healthKit.isHealthDataAvailableAsync();
     if (!available) {
       return { available: false, requestNeeded: false, hasRequested: false, status: 'unavailable' };
     }
 
     const [requestStatus, hasRequested] = await Promise.all([
-      getRequestStatusForAuthorization({ toRead: READ_TYPES }),
+      healthKit.getRequestStatusForAuthorization({ toRead: READ_TYPES }),
       loadAppleHealthRequested(),
     ]);
-    const requestNeeded = requestStatus === AuthorizationRequestStatus.shouldRequest;
+    const requestNeeded = requestStatus === healthKit.AuthorizationRequestStatus.shouldRequest;
 
     return {
       available: true,
@@ -126,7 +214,10 @@ export async function requestHealthPermissions(): Promise<AppleHealthAuthorizati
   if (!initialStatus.available) return initialStatus;
 
   try {
-    const completed = await requestAuthorization({ toRead: READ_TYPES });
+    const healthKit = getHealthKitModule();
+    if (!healthKit) return { available: false, requestNeeded: false, hasRequested: false, status: 'unavailable' };
+
+    const completed = await healthKit.requestAuthorization({ toRead: READ_TYPES });
     if (!completed) return { ...initialStatus, status: 'error' };
 
     await saveAppleHealthRequested(true);
@@ -139,7 +230,10 @@ export async function requestHealthPermissions(): Promise<AppleHealthAuthorizati
 
 export async function getTodaySteps(): Promise<number | null> {
   try {
-    const result = await queryStatisticsForQuantity(
+    const healthKit = getHealthKitModule();
+    if (!healthKit) return null;
+
+    const result = await healthKit.queryStatisticsForQuantity(
       'HKQuantityTypeIdentifierStepCount',
       ['cumulativeSum'],
       {
@@ -163,7 +257,10 @@ export async function getTodaySteps(): Promise<number | null> {
 
 export async function getRecentHeartRate(): Promise<HeartRateSample | null> {
   try {
-    const sample = await getMostRecentQuantitySample(
+    const healthKit = getHealthKitModule();
+    if (!healthKit) return null;
+
+    const sample = await healthKit.getMostRecentQuantitySample(
       'HKQuantityTypeIdentifierHeartRate',
       'count/min'
     );
@@ -183,7 +280,10 @@ export async function getSleepData(): Promise<SleepData> {
     const now = new Date();
     const from = new Date(now);
     from.setDate(from.getDate() - 14);
-    const samples = await queryCategorySamples('HKCategoryTypeIdentifierSleepAnalysis', {
+    const healthKit = getHealthKitModule();
+    if (!healthKit) return { sessions: [], latestSleepDurationMinutes: null };
+
+    const samples = await healthKit.queryCategorySamples('HKCategoryTypeIdentifierSleepAnalysis', {
       filter: { date: { startDate: from, endDate: now } },
       limit: 500,
       ascending: false,
@@ -199,7 +299,7 @@ export async function getSleepData(): Promise<SleepData> {
             startTime: start.toISOString(),
             endTime: end.toISOString(),
             durationMinutes: Math.max(0, Math.round((end.getTime() - start.getTime()) / 60000)),
-            stage: sleepStage(sample.value),
+            stage: sleepStage(sample.value, healthKit.CategoryValueSleepAnalysis),
           };
           return [session.id, session] as const;
         })

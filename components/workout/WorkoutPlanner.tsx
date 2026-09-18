@@ -8,6 +8,7 @@ import {
 
 import { colors } from '../../constants/theme';
 import { WorkoutPlan } from '../../types/workoutPlan';
+import { MuscleRecency } from './muscleRecency';
 
 import TodayWorkoutCard from './TodayWorkoutCard';
 import WorkoutBuilder from './WorkoutBuilder';
@@ -17,6 +18,9 @@ type Props = {
   plans: WorkoutPlan[];
   onPlansChange: (plans: WorkoutPlan[]) => void;
   onStartPlan: (plan: WorkoutPlan) => void;
+  getExerciseRecency?: (
+    exerciseName: string
+  ) => MuscleRecency | null;
 };
 
 const weekdays = [
@@ -33,6 +37,7 @@ export default function WorkoutPlanner({
   plans,
   onPlansChange,
   onStartPlan,
+  getExerciseRecency,
 }: Props) {
   const [buildingWorkout, setBuildingWorkout] =
     useState(false);
@@ -129,6 +134,9 @@ export default function WorkoutPlanner({
             }
             onDelete={() =>
               deletePlan(plan.id)
+            }
+            getExerciseRecency={
+              getExerciseRecency
             }
           />
         ))

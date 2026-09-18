@@ -3,9 +3,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   Alert,
+  AppState,
+  Image,
+  Keyboard,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
+  TouchableWithoutFeedback,
   ScrollView,
   StyleSheet,
   Text,
@@ -34,9 +39,18 @@ import {
 import { estimateWorkoutCalories } from '../../utils/workout-calories';
 
 import { WorkoutPlan } from '../../types/workoutPlan';
+import { getMuscleRecencyForExercise } from './muscleRecency';
 
 import ExerciseLibrary from '../exercise-library/ExerciseLibrary';
 import { ExerciseRecord } from '../exercise-library/exerciseData';
+import {
+  getExerciseGif,
+  getExerciseImage,
+} from '../exercise-library/exerciseMedia';
+import {
+  getExerciseByName,
+  getExerciseMeasurement,
+} from './exerciseMeasurement';
 
 import ExerciseCard from './ExerciseCard';
 import WorkoutHistory from './WorkoutHistory';
@@ -108,6 +122,11 @@ export default function WorkoutScreen() {
     prSetIds,
     setPrSetIds,
   ] = useState<string[]>([]);
+
+  const [
+    selectedMediaExercise,
+    setSelectedMediaExercise,
+  ] = useState<WorkoutExercise | null>(null);
 
   /*
    * LOAD WORKOUT HISTORY
@@ -181,16 +200,28 @@ export default function WorkoutScreen() {
       return;
     }
 
-    const timer = setInterval(() => {
+    const refreshElapsed = () => {
       setElapsedSeconds(
         Math.floor(
           (Date.now() - startedAt) / 1000
         )
       );
-    }, 1000);
+    };
+
+    refreshElapsed();
+    const timer = setInterval(refreshElapsed, 1000);
+    const subscription = AppState.addEventListener(
+      'change',
+      (state) => {
+        if (state === 'active') {
+          refreshElapsed();
+        }
+      }
+    );
 
     return () => {
       clearInterval(timer);
+      subscription.remove();
     };
   }, [startedAt]);
 
@@ -271,6 +302,14 @@ export default function WorkoutScreen() {
       remaining
     ).padStart(2, '0')}`;
   };
+
+  const getExerciseRecency = (
+    exerciseName: string
+  ) =>
+    getMuscleRecencyForExercise(
+      exerciseName,
+      history
+    );
 
   /*
    * FIND MOST RECENT PERFORMANCE
@@ -734,7 +773,7 @@ export default function WorkoutScreen() {
 
         exercises:
           exercises.map(
-            (exercise) => ({
+            (exercise, exerciseIndex) => ({
               id:
                 createId(),
 
@@ -1094,6 +1133,146 @@ export default function WorkoutScreen() {
     }
   };
 
+  const confirmDestructiveAction = (
+    title: string,
+    message: string,
+    onConfirm: () => void
+  ) => {
+    if (Platform.OS === 'web') {
+      if (window.confirm(`${title}\n\n${message}`)) {
+        onConfirm();
+      }
+      return;
+    }
+
+    Alert.alert(title, message, [
+      {
+        text: 'Cancel',
+        style: 'cancel',
+      },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: onConfirm,
+      },
+    ]);
+  };
+
+  const moveItem = <T,>(
+    list: T[],
+    fromIndex: number,
+    toIndex: number
+  ) => {
+    if (
+      fromIndex < 0 ||
+      toIndex < 0 ||
+      fromIndex >= list.length ||
+      toIndex >= list.length
+    ) {
+      return list;
+    }
+
+    const next = [...list];
+    const [item] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, item);
+    return next;
+  };
+
+  const moveExercise = (
+    exerciseId: string,
+    direction: -1 | 1
+  ) => {
+    setExercises((current) => {
+      const index = current.findIndex(
+        (exercise) => exercise.id === exerciseId
+      );
+
+      return moveItem(
+        current,
+        index,
+        index + direction
+      );
+    });
+  };
+
+  const moveSet = (
+    exerciseId: string,
+    setId: string,
+    direction: -1 | 1
+  ) => {
+    setExercises((current) =>
+      current.map((exercise) => {
+        if (exercise.id !== exerciseId) {
+          return exercise;
+        }
+
+        const index = exercise.sets.findIndex(
+          (set) => set.id === setId
+        );
+
+        return {
+          ...exercise,
+          sets: moveItem(
+            exercise.sets,
+            index,
+            index + direction
+          ),
+        };
+      })
+    );
+  };
+
+  const removeSet = (
+    exerciseId: string,
+    setId: string
+  ) => {
+    const exercise = exercises.find(
+      (item) => item.id === exerciseId
+    );
+    const set = exercise?.sets.find(
+      (item) => item.id === setId
+    );
+
+    if (!exercise || !set || exercise.sets.length <= 1) {
+      return;
+    }
+
+    const remove = () => {
+      setPrSetIds((current) =>
+        current.filter((id) => id !== setId)
+      );
+      setExercises((current) =>
+        current.map((item) => {
+          if (item.id !== exerciseId) {
+            return item;
+          }
+
+          return {
+            ...item,
+            sets: item.sets.filter(
+              (workoutSet) => workoutSet.id !== setId
+            ),
+          };
+        })
+      );
+    };
+
+    if (
+      set.completed ||
+      set.weight.trim() ||
+      set.reps.trim()
+    ) {
+      confirmDestructiveAction(
+        'Remove set?',
+        'This set already has entered workout data.',
+        remove
+      );
+      return;
+    }
+
+    remove();
+  };
+
   /*
    * REMOVE EXERCISE
    */
@@ -1101,50 +1280,55 @@ export default function WorkoutScreen() {
   const removeExercise = (
     exerciseId: string
   ) => {
-    const exercise =
-      exercises.find(
-        (item) =>
-          item.id ===
-          exerciseId
-      );
+    const exercise = exercises.find(
+      (item) => item.id === exerciseId
+    );
 
-    if (exercise) {
-      const setIds =
-        exercise.sets.map(
-          (set) => set.id
-        );
-
-      setPrSetIds(
-        (current) =>
-          current.filter(
-            (id) =>
-              !setIds.includes(id)
-          )
-      );
+    if (!exercise) {
+      return;
     }
 
-    setExercises(
-      (current) =>
+    const remove = () => {
+      const setIds = exercise.sets.map(
+        (set) => set.id
+      );
+
+      setPrSetIds((current) =>
         current.filter(
-          (exercise) =>
-            exercise.id !==
-            exerciseId
+          (id) => !setIds.includes(id)
         )
-    );
+      );
 
-    setExerciseRestTimes(
-      (current) => {
-        const next = {
-          ...current,
-        };
+      setExercises((current) =>
+        current.filter(
+          (item) => item.id !== exerciseId
+        )
+      );
 
-        delete next[
-          exerciseId
-        ];
-
+      setExerciseRestTimes((current) => {
+        const next = { ...current };
+        delete next[exerciseId];
         return next;
-      }
+      });
+    };
+
+    const hasEnteredData = exercise.sets.some(
+      (set) =>
+        set.completed ||
+        set.weight.trim() ||
+        set.reps.trim()
     );
+
+    if (hasEnteredData) {
+      confirmDestructiveAction(
+        'Remove exercise?',
+        `${exercise.name} already has entered workout data.`,
+        remove
+      );
+      return;
+    }
+
+    remove();
   };
 
   /*
@@ -1194,10 +1378,33 @@ export default function WorkoutScreen() {
 
   if (!startedAt) {
     return (
+      <KeyboardAvoidingView
+        style={styles.screen}
+        keyboardVerticalOffset={
+          Platform.OS === 'ios' ? 12 : 0
+        }
+        behavior={
+          Platform.OS === 'ios'
+            ? 'padding'
+            : undefined
+        }
+      >
+        <TouchableWithoutFeedback
+          accessible={false}
+          onPress={Keyboard.dismiss}
+        >
       <ScrollView
         contentContainerStyle={
           styles.plannerContainer
         }
+        automaticallyAdjustKeyboardInsets
+        keyboardDismissMode={
+          Platform.OS === 'ios'
+            ? 'interactive'
+            : 'on-drag'
+        }
+        keyboardShouldPersistTaps="handled"
+        onScrollBeginDrag={Keyboard.dismiss}
         showsVerticalScrollIndicator={
           false
         }
@@ -1309,6 +1516,9 @@ export default function WorkoutScreen() {
           onStartPlan={
             startWorkoutPlan
           }
+          getExerciseRecency={
+            getExerciseRecency
+          }
         />
 
         <WorkoutHistory
@@ -1320,6 +1530,8 @@ export default function WorkoutScreen() {
           }
         />
       </ScrollView>
+        </TouchableWithoutFeedback>
+      </KeyboardAvoidingView>
     );
   }
 
@@ -1327,10 +1539,22 @@ export default function WorkoutScreen() {
    * ACTIVE WORKOUT
    */
 
+  const selectedExerciseRecord = selectedMediaExercise
+    ? getExerciseByName(selectedMediaExercise.name)
+    : null;
+
+  const selectedMediaSource = selectedExerciseRecord
+    ? getExerciseGif(selectedExerciseRecord.id) ??
+      getExerciseImage(selectedExerciseRecord.id)
+    : null;
+
   return (
     <KeyboardAvoidingView
       style={
         styles.screen
+      }
+      keyboardVerticalOffset={
+        Platform.OS === 'ios' ? 12 : 0
       }
       behavior={
         Platform.OS ===
@@ -1339,11 +1563,71 @@ export default function WorkoutScreen() {
           : undefined
       }
     >
+      <Modal
+        animationType="slide"
+        transparent
+        visible={Boolean(selectedMediaExercise)}
+        onRequestClose={() =>
+          setSelectedMediaExercise(null)
+        }
+      >
+        <View style={styles.mediaModalOverlay}>
+          <View style={styles.mediaModalCard}>
+            <View style={styles.mediaModalHeader}>
+              <Text style={styles.mediaModalTitle}>
+                {selectedMediaExercise?.name}
+              </Text>
+
+              <Pressable
+                accessibilityRole="button"
+                onPress={() =>
+                  setSelectedMediaExercise(null)
+                }
+                style={styles.mediaCloseButton}
+              >
+                <Text style={styles.mediaCloseText}>
+                  Close
+                </Text>
+              </Pressable>
+            </View>
+
+            {selectedMediaSource ? (
+              <Image
+                resizeMode="contain"
+                source={selectedMediaSource}
+                style={styles.mediaPreview}
+              />
+            ) : (
+              <View style={styles.mediaFallback}>
+                <Text style={styles.mediaFallbackText}>
+                  No exercise media available
+                </Text>
+              </View>
+            )}
+
+            <Text style={styles.mediaHint}>
+              Your workout timer, sets, reps, and completed marks stay active while this is open.
+            </Text>
+          </View>
+        </View>
+      </Modal>
+
+      <TouchableWithoutFeedback
+        accessible={false}
+        onPress={Keyboard.dismiss}
+      >
       <ScrollView
         contentContainerStyle={
           styles.activeContainer
         }
+        automaticallyAdjustKeyboardInsets
+        keyboardDismissMode={
+          Platform.OS === 'ios'
+            ? 'interactive'
+            : 'on-drag'
+        }
         keyboardShouldPersistTaps="handled"
+        onScrollBeginDrag={Keyboard.dismiss}
         showsVerticalScrollIndicator={
           false
         }
@@ -1559,7 +1843,7 @@ export default function WorkoutScreen() {
           </View>
         ) : (
           exercises.map(
-            (exercise) => (
+            (exercise, exerciseIndex) => (
               <ExerciseCard
                 key={
                   exercise.id
@@ -1569,13 +1853,77 @@ export default function WorkoutScreen() {
                   exercise
                 }
 
+                measurement={
+                  getExerciseMeasurement(
+                    exercise.name
+                  )
+                }
+
+                canMoveUp={
+                  exerciseIndex > 0
+                }
+
+                canMoveDown={
+                  exerciseIndex <
+                  exercises.length - 1
+                }
+
                 prSetIds={
                   prSetIds
+                }
+
+                muscleRecencyLabel={
+                  getExerciseRecency(
+                    exercise.name
+                  )?.label
                 }
 
                 onAddSet={() =>
                   addSet(
                     exercise.id
+                  )
+                }
+
+                onViewMedia={() =>
+                  setSelectedMediaExercise(
+                    exercise
+                  )
+                }
+
+                onMoveUp={() =>
+                  moveExercise(
+                    exercise.id,
+                    -1
+                  )
+                }
+
+                onMoveDown={() =>
+                  moveExercise(
+                    exercise.id,
+                    1
+                  )
+                }
+
+                onRemoveSet={(setId) =>
+                  removeSet(
+                    exercise.id,
+                    setId
+                  )
+                }
+
+                onMoveSetUp={(setId) =>
+                  moveSet(
+                    exercise.id,
+                    setId,
+                    -1
+                  )
+                }
+
+                onMoveSetDown={(setId) =>
+                  moveSet(
+                    exercise.id,
+                    setId,
+                    1
                   )
                 }
 
@@ -1613,10 +1961,11 @@ export default function WorkoutScreen() {
 
         <View
           style={{
-            height: 90,
+            height: 180,
           }}
         />
       </ScrollView>
+      </TouchableWithoutFeedback>
     </KeyboardAvoidingView>
   );
 }
@@ -1645,6 +1994,76 @@ const styles =
         colors.background,
     },
 
+
+    mediaModalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.45)',
+      justifyContent: 'flex-end',
+      padding: 16,
+    },
+
+    mediaModalCard: {
+      backgroundColor: colors.surface,
+      borderRadius: 22,
+      padding: 18,
+      maxHeight: '88%',
+    },
+
+    mediaModalHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      marginBottom: 14,
+    },
+
+    mediaModalTitle: {
+      flex: 1,
+      color: colors.text,
+      fontSize: 20,
+      fontWeight: '900',
+    },
+
+    mediaCloseButton: {
+      minHeight: 40,
+      paddingHorizontal: 14,
+      borderRadius: 12,
+      backgroundColor: colors.text,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+
+    mediaCloseText: {
+      color: colors.surface,
+      fontWeight: '900',
+    },
+
+    mediaPreview: {
+      width: '100%',
+      height: 360,
+      borderRadius: 16,
+      backgroundColor: colors.soft2,
+    },
+
+    mediaFallback: {
+      height: 280,
+      borderRadius: 16,
+      backgroundColor: colors.soft2,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+
+    mediaFallbackText: {
+      color: colors.muted,
+      fontWeight: '800',
+    },
+
+    mediaHint: {
+      marginTop: 12,
+      color: colors.muted,
+      fontSize: 12,
+      lineHeight: 18,
+      textAlign: 'center',
+    },
     header: {
       marginBottom: 18,
     },
@@ -1845,4 +2264,3 @@ const styles =
       color: colors.muted,
     },
   });
-  

@@ -7,11 +7,15 @@ import {
 
 import { colors } from '../../constants/theme';
 import { WorkoutPlan } from '../../types/workoutPlan';
+import { MuscleRecency } from './muscleRecency';
 
 type Props = {
   plan: WorkoutPlan;
   onStart: () => void;
   onDelete: () => void;
+  getExerciseRecency?: (
+    exerciseName: string
+  ) => MuscleRecency | null;
 };
 
 function formatRest(seconds: number) {
@@ -37,6 +41,7 @@ export default function WorkoutPlanCard({
   plan,
   onStart,
   onDelete,
+  getExerciseRecency,
 }: Props) {
   return (
     <View style={styles.card}>
@@ -64,7 +69,10 @@ export default function WorkoutPlanCard({
         {plan.exercises.length === 1 ? '' : 's'}
       </Text>
 
-      {plan.exercises.map((exercise, index) => (
+      {plan.exercises.map((exercise, index) => {
+        const recency = getExerciseRecency?.(exercise.name);
+
+        return (
         <View
           key={exercise.id}
           style={styles.exerciseRow}
@@ -86,9 +94,16 @@ export default function WorkoutPlanCard({
               {' • '}
               {formatRest(exercise.restSeconds)}
             </Text>
+
+            {recency ? (
+              <Text style={styles.exerciseRecency}>
+                {recency.label}
+              </Text>
+            ) : null}
           </View>
         </View>
-      ))}
+        );
+      })}
 
       <Pressable
         style={styles.startButton}
@@ -179,6 +194,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.muted,
     marginTop: 3,
+  },
+
+  exerciseRecency: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.text,
+    marginTop: 4,
   },
 
   startButton: {
