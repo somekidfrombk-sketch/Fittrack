@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 
 import { colors } from '../constants/theme';
+import { useAppleHealth } from '../hooks/use-apple-health';
 import type { ICloudBackupStatus } from '../types/icloudBackup';
 import { createFitTrackExport } from '../services/data-export';
 import {
@@ -45,6 +46,13 @@ export default function SettingsScreen() {
     lastBackupAt: null,
     fileCount: 0,
   });
+  const {
+    status: appleHealthStatus,
+    loading: appleHealthLoading,
+    initialize: initializeAppleHealth,
+    connect: connectAppleHealth,
+    refresh: refreshAppleHealth,
+  } = useAppleHealth();
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -65,6 +73,11 @@ export default function SettingsScreen() {
     if (Platform.OS !== 'ios') return;
     void getICloudBackupStatus().then(setBackupStatus);
   }, []);
+
+  useEffect(() => {
+    if (Platform.OS !== 'ios') return;
+    void initializeAppleHealth();
+  }, [initializeAppleHealth]);
 
   const chooseRunNoticeDistance = async (distanceMiles: number | null) => {
     if (!profileId) {
@@ -193,12 +206,37 @@ export default function SettingsScreen() {
     ]);
   };
 
-  const explainWearableConnection = () => {
-    const source = Platform.OS === 'ios' ? 'Apple Health' : 'Health Connect';
+  const showHealthConnectInfo = () => {
     Alert.alert(
-      `${source} integration`,
-      `This connection is prepared for a future native build. Once enabled, Apple Watch can sync through Apple Health and Amazfit can sync through the Zepp app into ${source}.`
+      'Health Connect integration',
+      'Amazfit can sync through the Zepp app into Health Connect on Android. FitTrack will read approved Health Connect data when Android native syncing is added.'
     );
+  };
+
+  const appleHealthStatusLabel =
+    appleHealthStatus === 'connected'
+      ? 'Connected'
+      : appleHealthStatus === 'not-requested'
+        ? 'Ready to connect'
+        : appleHealthStatus === 'checking'
+          ? 'Checking'
+          : appleHealthStatus === 'unavailable'
+            ? 'Unavailable'
+            : 'Needs attention';
+
+  const appleHealthButtonLabel =
+    appleHealthLoading
+      ? 'Loading...'
+      : appleHealthStatus === 'connected'
+        ? 'Refresh'
+        : 'Connect';
+
+  const handleAppleHealthPress = () => {
+    if (appleHealthStatus === 'connected') {
+      void refreshAppleHealth();
+      return;
+    }
+    void connectAppleHealth();
   };
 
   return (
@@ -345,24 +383,31 @@ export default function SettingsScreen() {
         onPress={togglePhonePedometer}
       />
 
-      <ConnectionCard
-        title={Platform.OS === 'android' ? 'Health Connect' : 'Apple Health'}
-        detail={
-          Platform.OS === 'android'
-            ? 'For Amazfit/Zepp steps and heart rate on Android.'
-            : 'For Apple Watch or Amazfit/Zepp steps and heart rate.'
-        }
-        status="Native integration next"
-        buttonLabel="Learn more"
-        onPress={explainWearableConnection}
-      />
-
+      {Platform.OS === 'ios' ? (
+        <ConnectionCard
+          title="Apple Health"
+          detail="Read-only access for steps, recent heart rate, and sleep from Apple Watch or Amazfit/Zepp."
+          status={appleHealthStatusLabel}
+          connected={appleHealthStatus === 'connected'}
+          disabled={appleHealthLoading || appleHealthStatus === 'unavailable'}
+          buttonLabel={appleHealthButtonLabel}
+          onPress={handleAppleHealthPress}
+        />
+      ) : (
+        <ConnectionCard
+          title="Health Connect"
+          detail="For Amazfit/Zepp steps and heart rate on Android."
+          status="Native integration next"
+          buttonLabel="Learn more"
+          onPress={showHealthConnectInfo}
+        />
+      )}
       <View style={styles.card}>
         <Text style={styles.cardTitle}>How Amazfit connects</Text>
         <Text style={styles.body}>
           In Zepp, enable sharing with Apple Health on iPhone or Health
-          Connect on Android. FitTrack will read the approved data from that
-          health service when native syncing is enabled.
+          Connect on Android. On iPhone, FitTrack reads only the Apple Health
+          data you approve.
         </Text>
       </View>
     </ScrollView>
@@ -374,6 +419,7 @@ function ConnectionCard({
   detail,
   status,
   connected = false,
+  disabled = false,
   buttonLabel,
   onPress,
 }: {
@@ -381,6 +427,7 @@ function ConnectionCard({
   detail: string;
   status: string;
   connected?: boolean;
+  disabled?: boolean;
   buttonLabel: string;
   onPress: () => void;
 }) {
@@ -395,7 +442,8 @@ function ConnectionCard({
       <Text style={styles.body}>{detail}</Text>
       <Pressable
         accessibilityRole="button"
-        style={[styles.connectButton, connected && styles.disconnectButton]}
+        disabled={disabled}
+        style={[styles.connectButton, connected && styles.disconnectButton, disabled && styles.disabledButton]}
         onPress={onPress}
       >
         <Text style={styles.connectButtonText}>{buttonLabel}</Text>
