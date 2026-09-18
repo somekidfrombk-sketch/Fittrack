@@ -6,6 +6,8 @@ import { reloadAsync } from 'expo-updates';
 import { useEffect, useState } from 'react';
 import {
   Alert,
+  AppState,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -55,7 +57,6 @@ export default function SettingsScreen() {
     loading: appleHealthLoading,
     initialize: initializeAppleHealth,
     connect: connectAppleHealth,
-    refresh: refreshAppleHealth,
   } = useAppleHealth();
 
   useEffect(() => {
@@ -76,6 +77,10 @@ export default function SettingsScreen() {
   useEffect(() => {
     if (Platform.OS !== 'ios') return;
     void getICloudBackupStatus().then(setBackupStatus);
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void getICloudBackupStatus().then(setBackupStatus);
+    });
+    return () => subscription.remove();
   }, []);
 
   useEffect(() => {
@@ -289,15 +294,46 @@ export default function SettingsScreen() {
     appleHealthLoading
       ? 'Loading...'
       : appleHealthStatus === 'connected'
-        ? 'Refresh'
+        ? 'Review access'
         : 'Connect';
 
-  const handleAppleHealthPress = () => {
-    if (appleHealthStatus === 'connected') {
-      void refreshAppleHealth();
+  const openFitTrackSettings = () => {
+    void Linking.openSettings().catch((error) => {
+      console.error('Failed to open FitTrack settings:', error);
+      Alert.alert('Open Settings manually', 'Open iPhone Settings, choose Apps, FitTrack, then review Health access.');
+    });
+  };
+
+  const handleAppleHealthPress = async () => {
+    const authorization = await connectAppleHealth();
+    if (authorization.status === 'connected') {
+      Alert.alert(
+        'Apple Health request completed',
+        'FitTrack requested read-only access to steps, recent heart rate, and sleep. If you already answered this request, iOS may not show it again. To change access, open Health, tap your profile, then Apps, then FitTrack. Apple does not reveal which read permissions you allowed.',
+        [
+          { text: 'Done', style: 'cancel' },
+          { text: 'Open Settings', onPress: openFitTrackSettings },
+        ]
+      );
       return;
     }
-    void connectAppleHealth();
+
+    if (authorization.status === 'unavailable') {
+      Alert.alert(
+        'Apple Health unavailable',
+        'Apple Health permission requires an iPhone standalone build that includes the HealthKit native module. It is not available in Expo Go or a build created before HealthKit was added.'
+      );
+      return;
+    }
+
+    Alert.alert(
+      'Could not connect Apple Health',
+      'FitTrack could not open the Apple Health permission request. Restart the app and try again. If you previously answered the request, review FitTrack\'s Health access in Settings.',
+      [
+        { text: 'Close', style: 'cancel' },
+        { text: 'Open Settings', onPress: openFitTrackSettings },
+      ]
+    );
   };
 
   return (
@@ -384,12 +420,23 @@ export default function SettingsScreen() {
         <View style={styles.connectionCard}>
           <Text style={styles.cardTitle}>iCloud Backup</Text>
           <Text style={styles.body}>
-            {backupStatus.exists && backupStatus.lastBackupAt
+            {backupStatus.error || (backupStatus.exists && backupStatus.lastBackupAt
               ? `Last backup: ${new Date(backupStatus.lastBackupAt).toLocaleString()} · ${backupStatus.fileCount} photo file${backupStatus.fileCount === 1 ? '' : 's'}`
               : backupStatus.available
                 ? 'No FitTrack backup has been created yet.'
-                : 'iCloud Drive is unavailable. Make sure you are signed in and iCloud Drive is enabled.'}
+                : 'Checking iCloud Drive…')}
           </Text>
+          <Pressable
+            accessibilityRole="button"
+            disabled={backupBusy}
+            style={[styles.connectButton, backupBusy && styles.disabledButton]}
+            onPress={() => {
+              setBackupBusy(true);
+              void getICloudBackupStatus().then(setBackupStatus).finally(() => setBackupBusy(false));
+            }}
+          >
+            <Text style={styles.connectButtonText}>{backupBusy ? 'Working…' : 'Retry iCloud connection'}</Text>
+          </Pressable>
           <View style={styles.backupButtons}>
             <Pressable
               accessibilityRole="button"
@@ -458,9 +505,9 @@ export default function SettingsScreen() {
           detail="Read-only access for steps, recent heart rate, and sleep from Apple Watch or Amazfit/Zepp."
           status={appleHealthStatusLabel}
           connected={appleHealthStatus === 'connected'}
-          disabled={appleHealthLoading || appleHealthStatus === 'unavailable'}
+          disabled={appleHealthLoading}
           buttonLabel={appleHealthButtonLabel}
-          onPress={handleAppleHealthPress}
+          onPress={() => void handleAppleHealthPress()}
         />
       ) : (
         <ConnectionCard

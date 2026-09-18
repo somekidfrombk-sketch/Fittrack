@@ -102,3 +102,17 @@ test('workout history migration preserves other profiles', async () => {
   assert.equal((await workouts.loadWorkoutHistory('b'))[0].id, 'other');
 });
 
+
+
+test('legacy vitamin records load with new tracking defaults', async () => {
+  const h = harness();
+  h.data.set('fittrack_vitamins', JSON.stringify([{ id: 'old', profileId: 'a', name: 'Vitamin D', dose: '1000 IU', time: '08:00', foodTiming: 'with-food', guidance: 'legacy', reminderEnabled: true, takenDates: ['2026-09-18'], createdAt: '2026-09-01T00:00:00.000Z' }]));
+  const vitamins = h.load('services/vitamin-storage.ts');
+  const loaded = await vitamins.loadVitamins('a');
+  assert.equal(loaded[0].name, 'Vitamin D');
+  assert.equal(loaded[0].dose, '1000 IU');
+  assert.equal(loaded[0].servings, '1');
+  assert.equal(loaded[0].frequency, 'Daily');
+  assert.equal(loaded[0].notes, '');
+  assert.deepEqual(loaded[0].takenDates, ['2026-09-18']);
+});

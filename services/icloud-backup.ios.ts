@@ -178,9 +178,11 @@ async function readManifest(): Promise<BackupManifest | null> {
 }
 
 export async function getICloudBackupStatus(): Promise<ICloudBackupStatus> {
+  let available = false;
   try {
-    const available = await CloudStorage.isCloudAvailable();
-    if (!available) return { available: false, exists: false, lastBackupAt: null, fileCount: 0 };
+    available = await CloudStorage.isCloudAvailable();
+    if (!available) return { available: false, exists: false, lastBackupAt: null, fileCount: 0,
+      error: 'iCloud Drive is unavailable. In iPhone Settings, open your Apple Account, then iCloud, and enable iCloud Drive. The installed app must also be signed with iCloud access.' };
 
     const manifest = await readManifest();
     if (!manifest) return { available: true, exists: false, lastBackupAt: null, fileCount: 0 };
@@ -192,7 +194,8 @@ export async function getICloudBackupStatus(): Promise<ICloudBackupStatus> {
     };
   } catch (error) {
     console.warn('Unable to read iCloud backup status:', error);
-    return { available: false, exists: false, lastBackupAt: null, fileCount: 0 };
+    return { available, exists: false, lastBackupAt: null, fileCount: 0,
+      error: 'Could not read the FitTrack backup. Check your connection and retry. ' + (error instanceof Error ? error.message : 'iCloud returned an unexpected error.') };
   }
 }
 

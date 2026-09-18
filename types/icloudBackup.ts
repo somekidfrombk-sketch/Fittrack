@@ -1,4 +1,5 @@
 export type ICloudBackupStatus = {
+  error?: string;
   available: boolean;
   exists: boolean;
   lastBackupAt: string | null;

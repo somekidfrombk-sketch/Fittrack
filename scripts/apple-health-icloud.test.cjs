@@ -57,6 +57,13 @@ test('HealthKit requests only steps, heart rate and sleep reads; handles empty d
   assert.equal((await api.getSleepData()).latestSleepDurationMinutes, 480);
 });
 
+test('Apple Health settings keeps Connect actionable when the native module is unavailable', () => {
+  const settings = fs.readFileSync('app/settings.tsx', 'utf8');
+  assert.match(settings, /disabled=\{appleHealthLoading\}/);
+  assert.match(settings, /Apple Health permission requires an iPhone standalone build/);
+  assert.match(settings, /const authorization = await connectAppleHealth\(\)/);
+});
+
 function backupHarness() {
   const storage = new Map();
   const bytes = new Map();
@@ -256,4 +263,18 @@ test('iCloud downloads an evicted manifest before reading backup status', async 
   await h.api.createICloudBackup();
   h.evict();
   assert.equal((await h.api.getICloudBackupStatus()).exists, true);
+});
+
+
+test('iCloud backup read errors do not report the account as disconnected and can recover', async () => {
+  const h = backupHarness();
+  h.cloud.set('/FitTrack/backup.json', 'invalid json');
+  const failed = await h.api.getICloudBackupStatus();
+  assert.equal(failed.available, true);
+  assert.equal(failed.exists, false);
+  assert.match(failed.error, /Could not read/);
+  h.cloud.delete('/FitTrack/backup.json');
+  const recovered = await h.api.getICloudBackupStatus();
+  assert.equal(recovered.available, true);
+  assert.equal(recovered.error, undefined);
 });

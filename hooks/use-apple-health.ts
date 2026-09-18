@@ -61,6 +61,7 @@ export function useAppleHealth() {
         setHeartRate(null);
         setSleep({ sessions: [], latestSleepDurationMinutes: null });
       }
+      return authorization;
     } finally {
       setLoading(false);
     }
