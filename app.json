@@ -11,7 +11,8 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.somekidfrombk.FitTrack",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSHealthShareUsageDescription": "FitTrack reads your steps, heart rate, and sleep from Apple Health to display your fitness metrics."
       },
       "buildNumber": "1"
     },
@@ -78,7 +79,23 @@
       "expo-image",
       "expo-sharing",
       "expo-web-browser",
-      "expo-status-bar"
+      "expo-status-bar",
+      [
+        "@kingstinct/react-native-healthkit",
+        {
+          "NSHealthShareUsageDescription": "FitTrack reads your steps, heart rate, and sleep from Apple Health to display your fitness metrics.",
+          "NSHealthUpdateUsageDescription": false,
+          "background": false
+        }
+      ],
+      [
+        "react-native-cloud-storage",
+        {
+          "iCloudContainerEnvironment": "Development",
+          "iCloudContainerIdentifier": "iCloud.com.somekidfrombk.FitTrack",
+          "enableKeyValueStorage": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

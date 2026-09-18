@@ -1,5 +1,6 @@
 import { router } from 'expo-router';
 import { Pedometer } from 'expo-sensors';
+import { reloadAsync } from 'expo-updates';
 import { useEffect, useState } from 'react';
 import {
   Alert,
@@ -13,7 +14,13 @@ import {
 } from 'react-native';
 
 import { colors } from '../constants/theme';
+import type { ICloudBackupStatus } from '../types/icloudBackup';
 import { createFitTrackExport } from '../services/data-export';
+import {
+  createICloudBackup,
+  getICloudBackupStatus,
+  restoreICloudBackup,
+} from '../services/icloud-backup';
 import { shareExportFile } from '../services/export-file';
 import {
   loadPhonePedometerEnabled,
@@ -31,6 +38,13 @@ export default function SettingsScreen() {
   const [runNoticeMiles, setRunNoticeMiles] = useState<number | null>(1);
   const [customDistance, setCustomDistance] = useState('');
   const [exporting, setExporting] = useState(false);
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupStatus, setBackupStatus] = useState<ICloudBackupStatus>({
+    available: false,
+    exists: false,
+    lastBackupAt: null,
+    fileCount: 0,
+  });
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -45,6 +59,11 @@ export default function SettingsScreen() {
       }
     };
     void loadSettings();
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS !== 'ios') return;
+    void getICloudBackupStatus().then(setBackupStatus);
   }, []);
 
   const chooseRunNoticeDistance = async (distanceMiles: number | null) => {
@@ -111,6 +130,55 @@ export default function SettingsScreen() {
     } finally {
       setExporting(false);
     }
+  };
+
+  const backupToICloud = async () => {
+    if (backupBusy) return;
+    setBackupBusy(true);
+    try {
+      const result = await createICloudBackup();
+      setBackupStatus({
+        available: true,
+        exists: true,
+        lastBackupAt: result.completedAt,
+        fileCount: result.fileCount,
+      });
+      Alert.alert('Backup complete', 'Your FitTrack data and photos are saved in iCloud.');
+    } catch (error) {
+      console.error('iCloud backup failed:', error);
+      Alert.alert('Backup failed', error instanceof Error ? error.message : 'Please try again.');
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const restoreFromICloud = async () => {
+    if (backupBusy) return;
+    setBackupBusy(true);
+    try {
+      await restoreICloudBackup();
+      Alert.alert(
+        'Restore complete',
+        'Your FitTrack data and photos were restored. FitTrack will reload now.',
+        [{ text: 'Reload FitTrack', onPress: () => { void reloadAsync().catch(() => Alert.alert('Restart FitTrack', 'Close and reopen FitTrack to load your restored data.')); } }]
+      );
+    } catch (error) {
+      console.error('iCloud restore failed:', error);
+      Alert.alert('Restore failed', error instanceof Error ? error.message : 'Please try again.');
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const confirmRestore = () => {
+    Alert.alert(
+      'Restore FitTrack from iCloud?',
+      'Saved iCloud data will replace matching FitTrack data on this phone. Current data is not removed until the backup downloads successfully.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Restore', onPress: () => void restoreFromICloud() },
+      ]
+    );
   };
 
   const confirmExport = () => {
@@ -213,6 +281,40 @@ export default function SettingsScreen() {
       <Text style={styles.sectionIntro}>
         Create a readable JSON file containing your FitTrack profile, meals, workouts, activities, steps, vitamins, and preferences. You can attach this file to ChatGPT.
       </Text>
+      {Platform.OS === 'ios' ? (
+        <View style={styles.connectionCard}>
+          <Text style={styles.cardTitle}>iCloud Backup</Text>
+          <Text style={styles.body}>
+            {backupStatus.exists && backupStatus.lastBackupAt
+              ? `Last backup: ${new Date(backupStatus.lastBackupAt).toLocaleString()} · ${backupStatus.fileCount} photo file${backupStatus.fileCount === 1 ? '' : 's'}`
+              : backupStatus.available
+                ? 'No FitTrack backup has been created yet.'
+                : 'iCloud Drive is unavailable. Make sure you are signed in and iCloud Drive is enabled.'}
+          </Text>
+          <View style={styles.backupButtons}>
+            <Pressable
+              accessibilityRole="button"
+              disabled={backupBusy || !backupStatus.available}
+              style={[styles.connectButton, styles.backupButton, (backupBusy || !backupStatus.available) && styles.disabledButton]}
+              onPress={() => void backupToICloud()}
+            >
+              <Text style={styles.connectButtonText}>{backupBusy ? 'Working…' : 'Back Up Now'}</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              disabled={backupBusy || !backupStatus.exists}
+              style={[styles.connectButton, styles.backupButton, styles.restoreButton, (backupBusy || !backupStatus.exists) && styles.disabledButton]}
+              onPress={confirmRestore}
+            >
+              <Text style={styles.connectButtonText}>Restore</Text>
+            </Pressable>
+          </View>
+          <Text style={styles.backupNote}>
+            FitTrack also attempts a safe backup when the app moves to the background. Apple Health information stays in Apple Health and is not copied.
+          </Text>
+        </View>
+      ) : null}
+
       <View style={styles.connectionCard}>
         <Text style={styles.cardTitle}>Export for ChatGPT</Text>
         <Text style={styles.body}>
@@ -435,6 +537,10 @@ const styles = StyleSheet.create({
   disconnectButton: {
     backgroundColor: colors.muted,
   },
+  backupButtons: { flexDirection: 'row', gap: 10 },
+  backupButton: { flex: 1 },
+  restoreButton: { backgroundColor: colors.muted },
+  backupNote: { marginTop: 12, fontSize: 11, lineHeight: 16, color: colors.lightMuted },
   disabledButton: { opacity: 0.55 },
   connectButtonText: {
     color: colors.surface,

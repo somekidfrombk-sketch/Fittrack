@@ -3,6 +3,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 
 import {
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,6 +12,7 @@ import {
 } from 'react-native';
 
 import { colors } from '../../constants/theme';
+import { useAppleHealth } from '../../hooks/use-apple-health';
 import { useDailySteps } from '../../hooks/use-daily-steps';
 import { loadPhonePedometerEnabled } from '../../services/health-connection-storage';
 import { loadFoodLogs } from '../../services/food-log-storage';
@@ -34,10 +36,22 @@ export default function DashboardScreen() {
   const [runs, setRuns] = useState<RunEntry[]>([]);
   const [vitamins, setVitamins] = useState<VitaminEntry[]>([]);
   const [phoneStepsEnabled, setPhoneStepsEnabled] = useState(false);
-  const { steps, status: stepStatus } = useDailySteps(
+  const {
+    status: appleHealthStatus,
+    steps: appleHealthSteps,
+    heartRate,
+    sleep,
+    loading: appleHealthLoading,
+    initialize: initializeAppleHealth,
+    connect: connectAppleHealth,
+    refresh: refreshAppleHealth,
+  } = useAppleHealth();
+  const useAppleHealthSteps = appleHealthStatus === 'connected' && appleHealthSteps !== null;
+  const { steps: phoneSteps, status: stepStatus } = useDailySteps(
     profile?.id ?? '',
-    phoneStepsEnabled
+    phoneStepsEnabled && !useAppleHealthSteps
   );
+  const steps = useAppleHealthSteps ? appleHealthSteps : phoneSteps;
 
   useFocusEffect(
     useCallback(() => {
@@ -71,10 +85,11 @@ export default function DashboardScreen() {
       };
 
       void loadDashboard();
+      void initializeAppleHealth();
       return () => {
         active = false;
       };
-    }, [])
+    }, [initializeAppleHealth])
   );
 
   const today = useLocalDate();
@@ -135,7 +150,8 @@ export default function DashboardScreen() {
   const runWalkingBaseline = Math.round(
     weightKg * (runDistanceMeters / 1000) * 0.5
   );
-  const runCalorieAdjustment = stepStatus === 'active'
+  const hasActiveStepSource = useAppleHealthSteps || stepStatus === 'active';
+  const runCalorieAdjustment = hasActiveStepSource
     ? Math.max(0, runCalories - runWalkingBaseline)
     : runCalories;
   const caloriesBurned = workoutCalories + stepCalories + runCalorieAdjustment + cyclingCalories;
@@ -145,16 +161,35 @@ export default function DashboardScreen() {
   const vitaminsTaken = vitamins.filter((item) => item.takenDates.includes(today)).length;
   const vitaminsDue = Math.max(0, vitamins.length - vitaminsTaken);
 
-  const stepNote =
-    !phoneStepsEnabled
-      ? 'Connect in Settings'
+  const stepNote = useAppleHealthSteps
+    ? 'Apple Health total'
+    : !phoneStepsEnabled
+      ? 'Connect Apple Health or enable steps in Settings'
       : stepStatus === 'active'
-      ? 'Device pedometer'
-      : stepStatus === 'denied'
-        ? 'Motion access denied'
-        : stepStatus === 'checking'
-          ? 'Checking device…'
-          : 'Pedometer unavailable';
+        ? 'Device pedometer'
+        : stepStatus === 'denied'
+          ? 'Motion access denied'
+          : stepStatus === 'checking'
+            ? 'Checking device…'
+            : 'Pedometer unavailable';
+
+  const sleepMinutes = sleep.latestSleepDurationMinutes;
+  const sleepLabel = sleepMinutes === null
+    ? 'No sleep data'
+    : `${Math.floor(sleepMinutes / 60)}h ${sleepMinutes % 60}m`;
+  const heartRateTime = heartRate
+    ? new Date(heartRate.timestamp).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+    : null;
+  const appleHealthStatusLabel =
+    appleHealthStatus === 'connected'
+      ? 'Connected'
+      : appleHealthStatus === 'not-requested'
+        ? 'Not connected'
+        : appleHealthStatus === 'checking'
+          ? 'Checking…'
+          : appleHealthStatus === 'unavailable'
+            ? 'Unavailable on this device'
+            : 'Could not connect';
 
   const openProfile = () => {
     router.push('/profile');
@@ -264,6 +299,48 @@ export default function DashboardScreen() {
         <Text style={styles.vitaminArrow}>›</Text>
       </Pressable>
 
+      {Platform.OS === 'ios' ? (
+        <View style={styles.healthCard}>
+          <View style={styles.healthHeader}>
+            <View style={styles.healthTitleGroup}>
+              <Text style={styles.healthEyebrow}>APPLE HEALTH</Text>
+              <Text style={styles.healthTitle}>{appleHealthStatusLabel}</Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              disabled={appleHealthLoading || appleHealthStatus === 'unavailable'}
+              onPress={() => void (appleHealthStatus === 'connected' ? refreshAppleHealth() : connectAppleHealth())}
+              style={[styles.healthButton, appleHealthLoading && styles.healthButtonDisabled]}
+            >
+              <Text style={styles.healthButtonText}>
+                {appleHealthLoading ? 'Loading…' : appleHealthStatus === 'connected' ? 'Refresh' : 'Connect Apple Health'}
+              </Text>
+            </Pressable>
+          </View>
+          <View style={styles.healthMetrics}>
+            <View style={styles.healthMetric}>
+              <Text style={styles.healthMetricLabel}>STEPS</Text>
+              <Text style={styles.healthMetricValue}>{appleHealthSteps?.toLocaleString() ?? '—'}</Text>
+            </View>
+            <View style={styles.healthMetric}>
+              <Text style={styles.healthMetricLabel}>LATEST HEART RATE</Text>
+              <Text style={styles.healthMetricValue}>{heartRate ? `${heartRate.beatsPerMinute} bpm` : '—'}</Text>
+              {heartRateTime ? <Text style={styles.healthMetricNote}>{heartRateTime}</Text> : null}
+            </View>
+            <View style={styles.healthMetric}>
+              <Text style={styles.healthMetricLabel}>LAST SLEEP</Text>
+              <Text style={styles.healthMetricValue}>{sleepLabel}</Text>
+            </View>
+          </View>
+          {appleHealthStatus === 'connected' &&
+          (appleHealthSteps === null || heartRate === null || sleepMinutes === null) ? (
+            <Text style={styles.healthPermissionNote}>
+              Missing a metric? Apple keeps read denials private. Enable Steps, Heart Rate, and Sleep for FitTrack in iPhone Settings or the Health app.
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
       {/* METRICS */}
 
       <View style={styles.grid}>
@@ -318,9 +395,9 @@ export default function DashboardScreen() {
         </Text>
 
         <Text style={styles.ruleText}>
-          FitTrack keeps strength workouts separate. When phone steps are active,
-          GPS running calories replace the walking portion already represented by
-          those steps, preventing duplicate active calories. Cycling calories remain separate.
+          FitTrack uses one step source at a time. Apple Health totals take priority
+          over the phone pedometer, and GPS running calories replace the walking portion
+          already represented by steps. Cycling and strength workouts remain separate.
         </Text>
       </View>
     </ScrollView>
@@ -417,6 +494,21 @@ const styles = StyleSheet.create({
     marginTop: 10,
     fontWeight: '700',
   },
+
+  healthCard: { backgroundColor: colors.surface, borderRadius: 20, padding: 18, marginBottom: 14 },
+  healthHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  healthTitleGroup: { flex: 1 },
+  healthEyebrow: { fontSize: 10, fontWeight: '900', letterSpacing: 1.2, color: colors.muted },
+  healthTitle: { marginTop: 3, fontSize: 19, fontWeight: '900', color: colors.text },
+  healthButton: { backgroundColor: colors.text, borderRadius: 12, paddingHorizontal: 13, paddingVertical: 10 },
+  healthButtonDisabled: { opacity: 0.55 },
+  healthButtonText: { color: colors.surface, fontSize: 12, fontWeight: '900' },
+  healthMetrics: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 16 },
+  healthMetric: { flexGrow: 1, minWidth: 95, backgroundColor: colors.soft, borderRadius: 14, padding: 12 },
+  healthMetricLabel: { fontSize: 9, fontWeight: '900', letterSpacing: 0.7, color: colors.muted },
+  healthMetricValue: { marginTop: 5, fontSize: 17, fontWeight: '900', color: colors.text },
+  healthMetricNote: { marginTop: 2, fontSize: 10, color: colors.muted },
+  healthPermissionNote: { marginTop: 13, fontSize: 12, lineHeight: 17, color: colors.muted },
 
   grid: {
     flexDirection: 'row',

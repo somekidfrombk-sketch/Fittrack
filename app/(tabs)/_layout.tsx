@@ -1,7 +1,11 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
+import { useAutomaticICloudBackup } from '../../hooks/use-automatic-icloud-backup';
+
 export default function TabLayout() {
+  useAutomaticICloudBackup();
+
   return (
     <Tabs
       screenOptions={{

@@ -15,11 +15,20 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Check TypeScript, lint, and tests
+        run: |
+          npm run typecheck
+          npm run lint
+          node --test scripts/*.test.cjs
+
+      - name: Validate Expo capabilities
+        run: node scripts/validate-ios-config.cjs
 
       - name: Generate iOS project
         run: npx expo prebuild --platform ios --clean --no-install
@@ -27,6 +36,29 @@ jobs:
       - name: Install CocoaPods
         working-directory: ios
         run: pod install
+
+      - name: Verify generated native capabilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          entitlements_file="$(find ios -name '*.entitlements' -type f | head -n 1)"
+          if [[ -z "$entitlements_file" ]]; then
+            echo "No generated entitlements file was found."
+            exit 1
+          fi
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.healthkit' "$entitlements_file" | grep -q true
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.icloud-services:0' "$entitlements_file" | grep -q CloudDocuments
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.icloud-container-identifiers:0' "$entitlements_file" | grep -q 'iCloud.com.somekidfrombk.FitTrack'
+          info_plist="$(find ios -mindepth 2 -maxdepth 2 -name 'Info.plist' -type f | head -n 1)"
+          if [[ -z "$info_plist" ]]; then
+            echo "No generated app Info.plist was found."
+            exit 1
+          fi
+          /usr/libexec/PlistBuddy -c 'Print :NSHealthShareUsageDescription' "$info_plist" >/dev/null
+          if /usr/libexec/PlistBuddy -c 'Print :NSHealthUpdateUsageDescription' "$info_plist" >/dev/null 2>&1; then
+            echo "Unexpected HealthKit write-purpose permission was generated."
+            exit 1
+          fi
 
       - name: Show available schemes
         run: |
