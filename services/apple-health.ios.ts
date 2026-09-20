@@ -209,22 +209,41 @@ export async function initializeHealthKit() {
   return getHealthAuthorizationStatus();
 }
 
-export async function requestHealthPermissions(): Promise<AppleHealthAuthorizationStatus> {
-  const initialStatus = await getHealthAuthorizationStatus();
-  if (!initialStatus.available) return initialStatus;
+function healthAuthorizationError(error: unknown): string {
+  const message = typeof error === 'string' ? error
+    : error && typeof error === 'object' && 'message' in error
+      ? String(error.message) : 'HealthKit returned an unknown error.';
+  if (/entitlement|provision|code.?sign/i.test(message)) {
+    return 'iOS rejected this installed app because its signing permissions do not allow HealthKit. The app must be signed with a provisioning profile that includes HealthKit. Opening Settings or rebuilding the same unsigned IPA will not fix the signing permissions.\n\nNative error: ' + message;
+  }
+  return 'The Apple Health permission request failed.\n\nNative error: ' + message;
+}
 
+export async function requestHealthPermissions(): Promise<AppleHealthAuthorizationStatus> {
+  const unavailable: AppleHealthAuthorizationStatus = {
+    available: false, requestNeeded: false, hasRequested: false, status: 'unavailable',
+  };
   try {
     const healthKit = getHealthKitModule();
-    if (!healthKit) return { available: false, requestNeeded: false, hasRequested: false, status: 'unavailable' };
+    if (!healthKit || !(await healthKit.isHealthDataAvailableAsync())) return unavailable;
 
+    // A user-initiated request must not depend on a stored connection flag or a status query.
     const completed = await healthKit.requestAuthorization({ toRead: READ_TYPES });
-    if (!completed) return { ...initialStatus, status: 'error' };
-
-    await saveAppleHealthRequested(true);
+    if (!completed) {
+      return { available: true, requestNeeded: false, hasRequested: false, status: 'error',
+        errorMessage: 'iOS did not complete the Apple Health permission request. Unlock your iPhone and try again.' };
+    }
+    try {
+      await saveAppleHealthRequested(true);
+    } catch (error) {
+      // Local storage failure does not mean the native authorization request failed.
+      console.warn('Could not save the Apple Health request flag:', error);
+    }
     return { available: true, requestNeeded: false, hasRequested: true, status: 'connected' };
   } catch (error) {
     console.error('Failed to request Apple Health access:', error);
-    return { ...initialStatus, status: 'error' };
+    return { available: true, requestNeeded: false, hasRequested: false, status: 'error',
+      errorMessage: healthAuthorizationError(error) };
   }
 }
 

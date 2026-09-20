@@ -116,3 +116,56 @@ test('legacy vitamin records load with new tracking defaults', async () => {
   assert.equal(loaded[0].notes, '');
   assert.deepEqual(loaded[0].takenDates, ['2026-09-18']);
 });
+
+
+const activeWorkout = () => ({
+  startedAt: 1800000000000, workoutIntensity: 'moderate',
+  exercises: [{ id: 'exercise', name: 'Bench Press', sets: [
+    { id: 'set', weight: '135', reps: '8', completed: true },
+    { id: 'next', weight: '140', reps: '6', completed: false },
+  ] }],
+  exerciseRestTimes: { exercise: 90 }, prSetIds: ['set'], restEndsAt: 1800000090000,
+});
+
+test('active workout survives a fresh app instance with entered sets and timer deadlines', async () => {
+  const first = harness();
+  const session = activeWorkout();
+  await first.load('services/workout-session-storage.ts').saveWorkoutSession('a', session);
+  const reopened = harness();
+  for (const pair of first.data) reopened.data.set(...pair);
+  const service = reopened.load('services/workout-session-storage.ts');
+  assert.deepEqual(await service.loadWorkoutSession('a'), session);
+  assert.equal(await service.loadWorkoutSession('b'), null);
+});
+
+test('navigation waits for pending session edits and finishing cannot be undone by an older write', async () => {
+  const h = harness();
+  const service = h.load('services/workout-session-storage.ts');
+  const first = activeWorkout();
+  const next = activeWorkout(); next.exercises[0].sets[1].completed = true;
+  const writes = [service.saveWorkoutSession('a', first), service.saveWorkoutSession('a', next)];
+  assert.deepEqual(await service.loadWorkoutSession('a'), next);
+  await Promise.all(writes);
+  const pending = service.saveWorkoutSession('a', next);
+  const finished = service.saveWorkoutSession('a', null);
+  await Promise.all([pending, finished]);
+  assert.equal(await service.loadWorkoutSession('a'), null);
+});
+
+test('failed draft save preserves previous workout and later edits can recover', async () => {
+  const h = harness(); const service = h.load('services/workout-session-storage.ts');
+  const session = activeWorkout();
+  await service.saveWorkoutSession('a', session);
+  h.failWrite();
+  await assert.rejects(service.saveWorkoutSession('a', null), /disk unavailable/);
+  assert.deepEqual(await service.loadWorkoutSession('a'), session);
+  await service.saveWorkoutSession('a', null);
+  assert.equal(await service.loadWorkoutSession('a'), null);
+});
+
+test('invalid saved session is reported without deleting its original bytes', async () => {
+  const h = harness(); const service = h.load('services/workout-session-storage.ts');
+  h.data.set('fittrack_workout_session:a', '{"startedAt":1}');
+  await assert.rejects(service.loadWorkoutSession('a'), /original data preserved/);
+  assert.equal(h.data.get('fittrack_workout_session:a'), '{"startedAt":1}');
+});

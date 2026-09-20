@@ -7,7 +7,6 @@ import { useEffect, useState } from 'react';
 import {
   Alert,
   AppState,
-  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -297,13 +296,6 @@ export default function SettingsScreen() {
         ? 'Review access'
         : 'Connect';
 
-  const openFitTrackSettings = () => {
-    void Linking.openSettings().catch((error) => {
-      console.error('Failed to open FitTrack settings:', error);
-      Alert.alert('Open Settings manually', 'Open iPhone Settings, choose Apps, FitTrack, then review Health access.');
-    });
-  };
-
   const handleAppleHealthPress = async () => {
     const authorization = await connectAppleHealth();
     if (authorization.status === 'connected') {
@@ -312,7 +304,6 @@ export default function SettingsScreen() {
         'FitTrack requested read-only access to steps, recent heart rate, and sleep. If you already answered this request, iOS may not show it again. To change access, open Health, tap your profile, then Apps, then FitTrack. Apple does not reveal which read permissions you allowed.',
         [
           { text: 'Done', style: 'cancel' },
-          { text: 'Open Settings', onPress: openFitTrackSettings },
         ]
       );
       return;
@@ -328,11 +319,8 @@ export default function SettingsScreen() {
 
     Alert.alert(
       'Could not connect Apple Health',
-      'FitTrack could not open the Apple Health permission request. Restart the app and try again. If you previously answered the request, review FitTrack\'s Health access in Settings.',
-      [
-        { text: 'Close', style: 'cancel' },
-        { text: 'Open Settings', onPress: openFitTrackSettings },
-      ]
+      authorization.errorMessage ?? 'iOS did not complete the Apple Health permission request.',
+      [{ text: 'Close', style: 'cancel' }]
     );
   };
 

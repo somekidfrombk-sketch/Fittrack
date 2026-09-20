@@ -1,5 +1,6 @@
+import { loadWorkoutSession, saveWorkoutSession } from '../../services/workout-session-storage';
 import WorkoutPhotos from '../progress/WorkoutPhotos';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import {
   Alert,
@@ -71,6 +72,11 @@ type ExerciseSelection = {
 
 export default function WorkoutScreen() {
   const savingWorkout = useRef(false);
+  const [sessionLoaded, setSessionLoaded] = useState(false);
+  const [sessionLoadError, setSessionLoadError] = useState(false);
+  const [sessionSaveError, setSessionSaveError] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [restEndsAt, setRestEndsAt] = useState<number | null>(null);
   const [completedWorkout, setCompletedWorkout] = useState<WorkoutHistoryEntry | null>(null);
   const [profileId, setProfileId] =
     useState('');
@@ -114,8 +120,8 @@ export default function WorkoutScreen() {
     secondsLeft: restSecondsLeft,
     active: restActive,
     complete: restComplete,
-    start: startRestTimer,
-    reset: resetRestTimer,
+    start: startTimer,
+    reset: resetTimer,
   } = useRestTimer();
 
   const [
@@ -128,11 +134,31 @@ export default function WorkoutScreen() {
     setSelectedMediaExercise,
   ] = useState<WorkoutExercise | null>(null);
 
+  const startRestTimer = useCallback((seconds: number) => {
+    setRestEndsAt(Date.now() + seconds * 1000);
+    startTimer(seconds);
+  }, [startTimer]);
+  const resetRestTimer = () => {
+    setRestEndsAt(null);
+    resetTimer();
+  };
+
+  useLayoutEffect(() => {
+    if (!sessionLoaded || !profileId) return;
+    void saveWorkoutSession(profileId, startedAt === null ? null : {
+      startedAt, exercises, workoutIntensity, exerciseRestTimes, prSetIds, restEndsAt,
+    }).then(() => setSessionSaveError(false)).catch(error => {
+      console.error('Failed to save active workout:', error);
+      setSessionSaveError(true);
+    });
+  }, [sessionLoaded, profileId, startedAt, exercises, workoutIntensity, exerciseRestTimes, prSetIds, restEndsAt]);
+
   /*
    * LOAD WORKOUT HISTORY
    */
 
   useEffect(() => {
+    let cancelled = false;
     const loadWorkoutHistory = async () => {
       try {
         const activeProfileId =
@@ -143,6 +169,18 @@ export default function WorkoutScreen() {
             activeProfileId
           );
 
+        const session = await loadWorkoutSession(activeProfileId);
+        if (cancelled) return;
+        if (session && !savedHistory.some(entry => entry.id === `session-${session.startedAt}`)) {
+          setStartedAt(session.startedAt);
+          setExercises(session.exercises);
+          setWorkoutIntensity(session.workoutIntensity);
+          setExerciseRestTimes(session.exerciseRestTimes);
+          setPrSetIds(session.prSetIds);
+          setRestEndsAt(session.restEndsAt);
+          if (session.restEndsAt !== null) startTimer(Math.max(0, Math.ceil((session.restEndsAt - Date.now()) / 1000)));
+        }
+        setSessionLoaded(true);
         setProfileId(activeProfileId);
         setProfileWeightLb(
           Number(profile?.weight) || 0
@@ -153,13 +191,15 @@ export default function WorkoutScreen() {
           'Failed to load workout history:',
           error
         );
+        if (!cancelled) setSessionLoadError(true);
       } finally {
-        setHistoryLoaded(true);
+        if (!cancelled) setHistoryLoaded(true);
       }
     };
 
-    loadWorkoutHistory();
-  }, []);
+    void loadWorkoutHistory();
+    return () => { cancelled = true; };
+  }, [loadAttempt, startTimer]);
 
   /*
    * SAVE WORKOUT HISTORY
@@ -746,7 +786,7 @@ export default function WorkoutScreen() {
     const entry:
       WorkoutHistoryEntry = {
         id:
-          createId(),
+          `session-${startedAt}`,
 
         profileId,
 
@@ -805,6 +845,7 @@ export default function WorkoutScreen() {
       const completedEntry = { ...entry, userContext: await createUserContextSnapshot(profileId) };
       const updated = [completedEntry, ...history];
       await persistWorkoutHistory(profileId, updated);
+      await saveWorkoutSession(profileId, null);
       setHistory(updated);
       setCompletedWorkout(completedEntry);
       resetWorkoutState();
@@ -1376,6 +1417,15 @@ export default function WorkoutScreen() {
    * MAIN WORKOUT PAGE
    */
 
+  if (!sessionLoaded) {
+    return <View style={styles.plannerContainer}>
+      <Text style={styles.title}>{sessionLoadError ? 'Could not restore workout' : 'Restoring workout…'}</Text>
+      {sessionLoadError ? <Pressable onPress={() => { setSessionLoadError(false); setLoadAttempt(attempt => attempt + 1); }}>
+        <Text style={styles.subtitle}>Your saved session has been kept. Tap to retry.</Text>
+      </Pressable> : null}
+    </View>;
+  }
+
   if (!startedAt) {
     return (
       <KeyboardAvoidingView
@@ -1632,6 +1682,9 @@ export default function WorkoutScreen() {
           false
         }
       >
+        {sessionSaveError ? <Text accessibilityRole="alert" style={styles.subtitle}>
+          Your latest changes could not be saved. Keep this workout open and try editing again.
+        </Text> : null}
         <View
           style={
             styles.activeHeader

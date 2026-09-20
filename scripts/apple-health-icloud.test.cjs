@@ -278,3 +278,38 @@ test('iCloud backup read errors do not report the account as disconnected and ca
   assert.equal(recovered.available, true);
   assert.equal(recovered.error, undefined);
 });
+
+
+test('HealthKit requests directly without relying on status or local storage', async () => {
+  let requested = 0;
+  const api = load('services/apple-health.ios.ts', {
+    '@kingstinct/react-native-healthkit': {
+      isHealthDataAvailableAsync: async () => true,
+      getRequestStatusForAuthorization: async () => { throw new Error('Status unavailable'); },
+      requestAuthorization: async () => { requested++; return true; },
+    },
+    './health-connection-storage': {
+      loadAppleHealthRequested: async () => { throw new Error('Storage unavailable'); },
+      saveAppleHealthRequested: async () => { throw new Error('Storage unavailable'); },
+    },
+  });
+  assert.equal((await api.requestHealthPermissions()).status, 'connected');
+  assert.equal(requested, 1);
+});
+
+test('HealthKit preserves native failures and identifies missing signing entitlements', async () => {
+  for (const message of ['Missing com.apple.developer.healthkit entitlement', 'Device is locked']) {
+    const api = load('services/apple-health.ios.ts', {
+      '@kingstinct/react-native-healthkit': {
+        isHealthDataAvailableAsync: async () => true,
+        requestAuthorization: async () => { throw { message }; },
+      },
+      './health-connection-storage': {},
+    });
+    const result = await api.requestHealthPermissions();
+    assert.equal(result.status, 'error');
+    assert.equal(result.hasRequested, false);
+    assert.ok(result.errorMessage.includes(message));
+    assert.equal(result.errorMessage.includes('provisioning profile'), message.includes('entitlement'));
+  }
+});

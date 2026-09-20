@@ -6,6 +6,7 @@ export type AppleHealthConnectionStatus =
   | 'error';
 
 export type AppleHealthAuthorizationStatus = {
+  errorMessage?: string;
   available: boolean;
   requestNeeded: boolean;
   hasRequested: boolean;
