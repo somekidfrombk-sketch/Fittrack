@@ -7,6 +7,20 @@ import {
 
 import { colors } from '../../constants/theme';
 import { WorkoutHistoryEntry } from '../../types/workoutHistory';
+import { getExerciseMeasurement } from './exerciseMeasurement';
+
+function formatSet(exercise: WorkoutHistoryEntry['exercises'][number], set: WorkoutHistoryEntry['exercises'][number]['sets'][number]) {
+  const measurement = getExerciseMeasurement(exercise.name, exercise.trackingMethod);
+  if (measurement.kind === 'none') return 'No measurement';
+  if (measurement.kind === 'duration') return `${set.reps || '0'} sec`;
+  if (measurement.kind === 'bodyweight' || measurement.kind === 'reps') return `${set.reps || '0'} reps`;
+  if (measurement.kind === 'distance') {
+    return measurement.secondaryLabel
+      ? `${set.weight || '0'} mi · ${set.reps || '0'} min`
+      : `${set.weight || '0'} mi`;
+  }
+  return `${set.weight || '0'} lb × ${set.reps || '0'} reps`;
+}
 
 type Props = {
   history: WorkoutHistoryEntry[];
@@ -172,8 +186,7 @@ export default function WorkoutHistory({
                       ]}
                     >
                       Set {setIndex + 1}:{' '}
-                      {set.weight || '0'} lb ×{' '}
-                      {set.reps || '0'} reps
+                      {formatSet(exercise, set)}
                       {set.completed
                         ? ''
                         : ' • not completed'}

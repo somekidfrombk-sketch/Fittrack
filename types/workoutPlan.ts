@@ -10,6 +10,9 @@ export type Weekday =
 export type PlannedExercise = {
   id: string;
   name: string;
+  exerciseLibraryId?: string;
+  trackingMethod?: import('../components/exercise-library/exerciseData').ExerciseTrackingMethod;
+  image?: string;
 
   targetSets: string;
   targetReps: string;

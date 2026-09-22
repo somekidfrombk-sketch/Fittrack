@@ -73,13 +73,16 @@ export default function WorkoutBuilder({
       {
         id: createId(),
         name: exercise.name,
+        exerciseLibraryId: exercise.id,
+        trackingMethod: exercise.trackingMethod,
+        image: exercise.isCustom ? exercise.image : undefined,
         targetSets: String(
           Math.min(
             99,
             Math.max(1, sets)
           )
         ),
-        targetReps: String(
+        targetReps: exercise.trackingMethod && !['weight_reps', 'reps', 'bodyweight_reps'].includes(exercise.trackingMethod) ? '' : String(
           Math.min(
             99,
             Math.max(1, reps)
@@ -286,9 +289,8 @@ export default function WorkoutBuilder({
                     }
                   >
                     {exercise.targetSets}{' '}
-                    sets ×{' '}
-                    {exercise.targetReps}{' '}
-                    reps
+                    sets
+                    {exercise.targetReps ? ` × ${exercise.targetReps} reps` : ''}
                     {' • '}
                     {formatRest(
                       exercise.restSeconds

@@ -10,6 +10,8 @@ export type WorkoutHistorySet = {
 export type WorkoutHistoryExercise = {
   id: string;
   name: string;
+  trackingMethod?: import('../components/exercise-library/exerciseData').ExerciseTrackingMethod;
+  exerciseLibraryId?: string;
   sets: WorkoutHistorySet[];
 };
 

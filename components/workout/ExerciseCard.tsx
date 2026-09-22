@@ -145,9 +145,7 @@ export default function ExerciseCard({
 
       <View style={styles.columnHeader}>
         <Text style={styles.setHeader}>SET</Text>
-        <Text style={styles.inputHeader}>
-          {measurement.primaryLabel}
-        </Text>
+        {measurement.primaryLabel ? <Text style={styles.inputHeader}>{measurement.primaryLabel}</Text> : null}
         {hasSecondaryInput ? (
           <Text style={styles.inputHeader}>
             {measurement.secondaryLabel}
@@ -163,12 +161,8 @@ export default function ExerciseCard({
         const canMoveSetUp = index > 0;
         const canMoveSetDown = index < exercise.sets.length - 1;
         const canRemoveSet = exercise.sets.length > 1;
-        const primaryField =
-          measurement.kind === 'weighted' ||
-          measurement.kind === 'distance'
-            ? 'weight'
-            : 'reps';
-        const primaryValue = set[primaryField];
+        const primaryField = measurement.primaryField;
+        const primaryValue = primaryField ? set[primaryField] : '';
         const secondaryValue = set.reps;
 
         return (
@@ -196,7 +190,7 @@ export default function ExerciseCard({
                 </Text>
               </View>
 
-              <TextInput
+              {primaryField ? <TextInput
                 value={primaryValue}
                 onChangeText={(value) => {
                   onUpdateSet(
@@ -218,7 +212,7 @@ export default function ExerciseCard({
                   !hasSecondaryInput && styles.singleInput,
                   isCompleted && styles.completedInput,
                 ]}
-              />
+              /> : null}
 
               {hasSecondaryInput && measurement.secondaryKeyboard ? (
                 <TextInput

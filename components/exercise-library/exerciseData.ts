@@ -51,7 +51,27 @@ export type ExerciseRecord = {
 
   created_at?: string;
   attribution?: string;
+  isCustom?: boolean;
+  trackingMethod?: ExerciseTrackingMethod;
 };
+
+export type ExerciseTrackingMethod =
+  | 'weight_reps'
+  | 'reps'
+  | 'duration'
+  | 'distance'
+  | 'distance_time'
+  | 'bodyweight_reps'
+  | 'none';
+
+export function searchExerciseRecords(records: ExerciseRecord[], query: string) {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return records;
+  return records.filter((exercise) => [
+    exercise.name, exercise.category, exercise.body_part, exercise.target,
+    exercise.muscle_group, exercise.equipment, ...(exercise.secondary_muscles ?? []),
+  ].filter(Boolean).join(' ').toLowerCase().includes(normalized));
+}
 
 export const exercises = [
   ...(exercisesJson as ExerciseRecord[]),

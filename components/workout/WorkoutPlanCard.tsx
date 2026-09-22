@@ -52,7 +52,7 @@ export default function WorkoutPlanCard({
           </Text>
 
           <Text style={styles.days}>
-            {plan.days.join(' • ')}
+            {plan.days.length ? plan.days.join(' • ') : 'Any day'}
           </Text>
         </View>
 
@@ -89,8 +89,8 @@ export default function WorkoutPlanCard({
             </Text>
 
             <Text style={styles.exerciseMeta}>
-              {exercise.targetSets} sets ×{' '}
-              {exercise.targetReps} reps
+              {exercise.targetSets} sets
+              {exercise.targetReps ? ` × ${exercise.targetReps} reps` : ''}
               {' • '}
               {formatRest(exercise.restSeconds)}
             </Text>

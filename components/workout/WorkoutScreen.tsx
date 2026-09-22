@@ -1,5 +1,7 @@
 import { loadWorkoutSession, saveWorkoutSession } from '../../services/workout-session-storage';
+import { loadWorkoutPlans, saveWorkoutPlans } from '../../services/workout-plan-storage';
 import WorkoutPhotos from '../progress/WorkoutPhotos';
+import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import {
@@ -15,6 +17,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 
@@ -40,10 +43,11 @@ import {
 import { estimateWorkoutCalories } from '../../utils/workout-calories';
 
 import { WorkoutPlan } from '../../types/workoutPlan';
+import { localDateKey } from '../../utils/date';
 import { getMuscleRecencyForExercise } from './muscleRecency';
 
 import ExerciseLibrary from '../exercise-library/ExerciseLibrary';
-import { ExerciseRecord } from '../exercise-library/exerciseData';
+import { ExerciseRecord, getExerciseById } from '../exercise-library/exerciseData';
 import {
   getExerciseGif,
   getExerciseImage,
@@ -71,6 +75,8 @@ type ExerciseSelection = {
 };
 
 export default function WorkoutScreen() {
+  const { date: requestedDate, requestId } = useLocalSearchParams<{ date?: string; requestId?: string }>();
+  const handledRequest = useRef<string | null>(null);
   const savingWorkout = useRef(false);
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const [sessionLoadError, setSessionLoadError] = useState(false);
@@ -97,6 +103,11 @@ export default function WorkoutScreen() {
 
   const [plans, setPlans] =
     useState<WorkoutPlan[]>([]);
+  const [workoutDate, setWorkoutDate] = useState<string | null>(null);
+  const [savePlanOpen, setSavePlanOpen] = useState(false);
+  const [savePlanName, setSavePlanName] = useState('');
+  const [savingPlan, setSavingPlan] = useState(false);
+  const [plansLoadError, setPlansLoadError] = useState(false);
 
   const [history, setHistory] =
     useState<WorkoutHistoryEntry[]>([]);
@@ -146,12 +157,12 @@ export default function WorkoutScreen() {
   useLayoutEffect(() => {
     if (!sessionLoaded || !profileId) return;
     void saveWorkoutSession(profileId, startedAt === null ? null : {
-      startedAt, exercises, workoutIntensity, exerciseRestTimes, prSetIds, restEndsAt,
+      startedAt, exercises, workoutIntensity, exerciseRestTimes, prSetIds, restEndsAt, workoutDate,
     }).then(() => setSessionSaveError(false)).catch(error => {
       console.error('Failed to save active workout:', error);
       setSessionSaveError(true);
     });
-  }, [sessionLoaded, profileId, startedAt, exercises, workoutIntensity, exerciseRestTimes, prSetIds, restEndsAt]);
+  }, [sessionLoaded, profileId, startedAt, exercises, workoutIntensity, exerciseRestTimes, prSetIds, restEndsAt, workoutDate]);
 
   /*
    * LOAD WORKOUT HISTORY
@@ -170,9 +181,15 @@ export default function WorkoutScreen() {
           );
 
         const session = await loadWorkoutSession(activeProfileId);
+        const savedPlans = await loadWorkoutPlans(activeProfileId).catch((error) => {
+          console.error('Failed to load workout plans:', error);
+          if (!cancelled) setPlansLoadError(true);
+          return [];
+        });
         if (cancelled) return;
         if (session && !savedHistory.some(entry => entry.id === `session-${session.startedAt}`)) {
           setStartedAt(session.startedAt);
+          setWorkoutDate(session.workoutDate ?? null);
           setExercises(session.exercises);
           setWorkoutIntensity(session.workoutIntensity);
           setExerciseRestTimes(session.exerciseRestTimes);
@@ -182,6 +199,7 @@ export default function WorkoutScreen() {
         }
         setSessionLoaded(true);
         setProfileId(activeProfileId);
+        setPlans(savedPlans);
         setProfileWeightLb(
           Number(profile?.weight) || 0
         );
@@ -200,6 +218,45 @@ export default function WorkoutScreen() {
     void loadWorkoutHistory();
     return () => { cancelled = true; };
   }, [loadAttempt, startTimer]);
+
+  useEffect(() => {
+    if (!sessionLoaded || !requestId || handledRequest.current === requestId) return;
+    handledRequest.current = requestId;
+    if (startedAt !== null) {
+      Alert.alert('Workout in progress', 'Finish your active workout before adding one for another day.');
+      return;
+    }
+    if (requestedDate && /^\d{4}-\d{2}-\d{2}$/.test(requestedDate) &&
+        localDateKey(new Date(`${requestedDate}T12:00:00`)) === requestedDate) {
+      const timer = setTimeout(() => {
+        setStartedAt(Date.now());
+        setWorkoutDate(requestedDate);
+        setElapsedSeconds(0);
+        setExercises([]);
+        setExerciseRestTimes({});
+        setExerciseLibraryOpen(false);
+        setRestEndsAt(null);
+        resetTimer();
+        setPrSetIds([]);
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [sessionLoaded, requestId, requestedDate, startedAt, resetTimer]);
+
+  const updatePlans = async (next: WorkoutPlan[]) => {
+    if (!profileId) return;
+    if (plansLoadError) {
+      Alert.alert('Saved workouts unavailable', 'Reopen the Workout screen and try again.');
+      return;
+    }
+    try {
+      await saveWorkoutPlans(profileId, next);
+      setPlans(next);
+    } catch (error) {
+      console.error('Failed to save workout plans:', error);
+      Alert.alert('Workout not saved', 'Please try again.');
+    }
+  };
 
   /*
    * SAVE WORKOUT HISTORY
@@ -288,6 +345,7 @@ export default function WorkoutScreen() {
     return exercises.reduce(
       (exerciseTotal, exercise) =>
         exerciseTotal +
+        (getExerciseMeasurement(exercise.name, exercise.trackingMethod).kind !== 'weighted' ? 0 :
         exercise.sets.reduce(
           (setTotal, set) => {
             if (!set.completed) {
@@ -306,7 +364,7 @@ export default function WorkoutScreen() {
             );
           },
           0
-        ),
+        )),
       0
     );
   }, [exercises]);
@@ -356,7 +414,8 @@ export default function WorkoutScreen() {
    */
 
   const findLastExercisePerformance = (
-    exerciseName: string
+    exerciseName: string,
+    libraryId?: string
   ):
     | WorkoutHistoryExercise
     | null => {
@@ -369,10 +428,9 @@ export default function WorkoutScreen() {
       const match =
         workout.exercises.find(
           (exercise) =>
-            exercise.name
-              .trim()
-              .toLowerCase() ===
-            normalizedName
+            libraryId?.startsWith('custom-')
+              ? exercise.exerciseLibraryId === libraryId
+              : exercise.name.trim().toLowerCase() === normalizedName
         );
 
       if (match) {
@@ -388,7 +446,8 @@ export default function WorkoutScreen() {
    */
 
   const getPreviousBestWeight = (
-    exerciseName: string
+    exerciseName: string,
+    libraryId?: string
   ): number | null => {
     const normalizedName =
       exerciseName
@@ -403,10 +462,9 @@ export default function WorkoutScreen() {
       const matchingExercise =
         workout.exercises.find(
           (exercise) =>
-            exercise.name
-              .trim()
-              .toLowerCase() ===
-            normalizedName
+            libraryId?.startsWith('custom-')
+              ? exercise.exerciseLibraryId === libraryId
+              : exercise.name.trim().toLowerCase() === normalizedName
         );
 
       if (!matchingExercise) {
@@ -487,6 +545,7 @@ export default function WorkoutScreen() {
 
   const resetWorkoutState = () => {
     setStartedAt(null);
+    setWorkoutDate(null);
     setElapsedSeconds(0);
     setWorkoutIntensity('moderate');
 
@@ -503,8 +562,9 @@ export default function WorkoutScreen() {
    * QUICK START
    */
 
-  const startEmptyWorkout = () => {
+  const startEmptyWorkout = (date = localDateKey()) => {
     setStartedAt(Date.now());
+    setWorkoutDate(date);
     setElapsedSeconds(0);
 
     setExercises([]);
@@ -514,6 +574,45 @@ export default function WorkoutScreen() {
     resetRestTimer();
 
     setPrSetIds([]);
+  };
+
+  const saveCurrentWorkoutAsPlan = async () => {
+    const name = savePlanName.trim();
+    if (!name || exercises.length === 0 || savingPlan) return;
+    if (plansLoadError) {
+      Alert.alert('Saved workouts unavailable', 'Reopen the Workout screen and try again.');
+      return;
+    }
+    const plan: WorkoutPlan = {
+      id: createId(),
+      name,
+      days: [],
+      exercises: exercises.map((exercise) => ({
+        id: createId(),
+        name: exercise.name,
+        exerciseLibraryId: exercise.exerciseLibraryId,
+        trackingMethod: exercise.trackingMethod,
+        image: exercise.image,
+        targetSets: String(exercise.sets.length),
+        targetReps: exercise.trackingMethod && !['weight_reps', 'reps', 'bodyweight_reps'].includes(exercise.trackingMethod)
+          ? ''
+          : exercise.sets.find((set) => Number(set.reps) > 0)?.reps ?? '10',
+        restSeconds: exerciseRestTimes[exercise.id] ?? 60,
+      })),
+    };
+    setSavingPlan(true);
+    try {
+      await saveWorkoutPlans(profileId, [...plans, plan]);
+      setPlans((current) => [...current, plan]);
+      setSavePlanName('');
+      setSavePlanOpen(false);
+      Alert.alert('Workout saved', 'Find it in Your Workout Plans.');
+    } catch (error) {
+      console.error('Failed to save workout plan:', error);
+      Alert.alert('Workout not saved', 'Please try again.');
+    } finally {
+      setSavingPlan(false);
+    }
   };
 
   /*
@@ -526,6 +625,7 @@ export default function WorkoutScreen() {
   const startWorkoutPlan = (
     plan: WorkoutPlan
   ) => {
+    setWorkoutDate(localDateKey());
     const restMap: Record<
       string,
       number
@@ -561,6 +661,8 @@ export default function WorkoutScreen() {
                 )
               )
             );
+          const hasReps = !plannedExercise.trackingMethod ||
+            ['weight_reps', 'reps', 'bodyweight_reps'].includes(plannedExercise.trackingMethod);
 
           const savedRest =
             Math.min(
@@ -577,7 +679,8 @@ export default function WorkoutScreen() {
 
           const previousExercise =
             findLastExercisePerformance(
-              plannedExercise.name
+              plannedExercise.name,
+              plannedExercise.exerciseLibraryId
             );
 
           const sets =
@@ -605,7 +708,7 @@ export default function WorkoutScreen() {
                   Number(previousReps) >= 1 &&
                   Number(previousReps) <= 99
                     ? previousReps
-                    : plannedReps;
+                    : hasReps ? plannedReps : '';
 
                 return {
                   id:
@@ -629,6 +732,10 @@ export default function WorkoutScreen() {
 
             name:
               plannedExercise.name,
+
+            exerciseLibraryId: plannedExercise.exerciseLibraryId,
+            trackingMethod: plannedExercise.trackingMethod,
+            image: plannedExercise.image,
 
             sets,
           };
@@ -693,7 +800,8 @@ export default function WorkoutScreen() {
 
     const previousExercise =
       findLastExercisePerformance(
-        exercise.name
+        exercise.name,
+        exercise.id
       );
 
     const newExercise:
@@ -703,6 +811,9 @@ export default function WorkoutScreen() {
 
         name:
           exercise.name,
+        exerciseLibraryId: exercise.id,
+        trackingMethod: exercise.trackingMethod,
+        image: exercise.isCustom ? exercise.image : undefined,
 
         sets: Array.from(
           {
@@ -723,12 +834,13 @@ export default function WorkoutScreen() {
             const previousReps =
               previousSet?.reps;
 
+            const hasReps = !exercise.trackingMethod ||
+              ['weight_reps', 'reps', 'bodyweight_reps'].includes(exercise.trackingMethod);
             const finalReps =
               previousReps &&
-              Number(previousReps) >= 1 &&
-              Number(previousReps) <= 99
+              (hasReps ? Number(previousReps) >= 1 && Number(previousReps) <= 99 : true)
                 ? previousReps
-                : String(safeReps);
+                : hasReps ? String(safeReps) : '';
 
             return {
               id:
@@ -791,7 +903,9 @@ export default function WorkoutScreen() {
         profileId,
 
         date:
-          new Date().toISOString(),
+          workoutDate && workoutDate !== localDateKey()
+            ? new Date(`${workoutDate}T12:00:00`).toISOString()
+            : new Date().toISOString(),
 
         durationSeconds:
           elapsedSeconds,
@@ -819,6 +933,8 @@ export default function WorkoutScreen() {
 
               name:
                 exercise.name,
+              trackingMethod: exercise.trackingMethod,
+              exerciseLibraryId: exercise.exerciseLibraryId,
 
               sets:
                 exercise.sets.map(
@@ -1075,7 +1191,7 @@ export default function WorkoutScreen() {
      * CHECK FOR NEW WEIGHT PR
      */
 
-    if (willBeCompleted) {
+    if (willBeCompleted && getExerciseMeasurement(exercise.name, exercise.trackingMethod).kind === 'weighted') {
       const currentWeight =
         Number(
           workoutSet.weight
@@ -1083,7 +1199,8 @@ export default function WorkoutScreen() {
 
       const previousBestWeight =
         getPreviousBestWeight(
-          exercise.name
+          exercise.name,
+          exercise.exerciseLibraryId
         );
 
       /*
@@ -1496,7 +1613,7 @@ export default function WorkoutScreen() {
             styles.quickStartButton
           }
           onPress={
-            startEmptyWorkout
+            () => startEmptyWorkout()
           }
         >
           <View
@@ -1556,12 +1673,13 @@ export default function WorkoutScreen() {
           </View>
         )}
 
+        {plansLoadError ? <Text style={styles.subtitle}>Saved workouts could not be loaded. Your other workout data is available.</Text> : null}
         <WorkoutPlanner
           plans={
             plans
           }
           onPlansChange={
-            setPlans
+            updatePlans
           }
           onStartPlan={
             startWorkoutPlan
@@ -1590,13 +1708,17 @@ export default function WorkoutScreen() {
    */
 
   const selectedExerciseRecord = selectedMediaExercise
-    ? getExerciseByName(selectedMediaExercise.name)
+    ? selectedMediaExercise.exerciseLibraryId?.startsWith('custom-')
+      ? null
+      : getExerciseById(selectedMediaExercise.exerciseLibraryId ?? '') ??
+        getExerciseByName(selectedMediaExercise.name)
     : null;
 
-  const selectedMediaSource = selectedExerciseRecord
-    ? getExerciseGif(selectedExerciseRecord.id) ??
-      getExerciseImage(selectedExerciseRecord.id)
-    : null;
+  const selectedMediaSource = selectedMediaExercise?.image
+    ? { uri: selectedMediaExercise.image }
+    : selectedExerciseRecord
+      ? getExerciseGif(selectedExerciseRecord.id) ?? getExerciseImage(selectedExerciseRecord.id)
+      : null;
 
   return (
     <KeyboardAvoidingView
@@ -1662,6 +1784,41 @@ export default function WorkoutScreen() {
         </View>
       </Modal>
 
+      <Modal
+        animationType="fade"
+        transparent
+        visible={savePlanOpen}
+        onRequestClose={() => setSavePlanOpen(false)}
+      >
+        <View style={styles.savePlanOverlay}>
+          <View style={styles.savePlanCard}>
+            <Text style={styles.savePlanTitle}>Save Current Workout</Text>
+            <Text style={styles.savePlanHint}>Reuse the current exercises, sets, and rest times later.</Text>
+            <TextInput
+              value={savePlanName}
+              onChangeText={setSavePlanName}
+              placeholder="Workout name"
+              placeholderTextColor={colors.lightMuted}
+              style={styles.savePlanInput}
+              returnKeyType="done"
+              onSubmitEditing={() => void saveCurrentWorkoutAsPlan()}
+            />
+            <View style={styles.savePlanActions}>
+              <Pressable onPress={() => setSavePlanOpen(false)} style={styles.savePlanCancel}>
+                <Text style={styles.savePlanCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                disabled={!savePlanName.trim() || savingPlan}
+                onPress={() => void saveCurrentWorkoutAsPlan()}
+                style={[styles.savePlanConfirm, (!savePlanName.trim() || savingPlan) && styles.savePlanDisabled]}
+              >
+                <Text style={styles.savePlanConfirmText}>{savingPlan ? 'Saving…' : 'Save Workout'}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <TouchableWithoutFeedback
         accessible={false}
         onPress={Keyboard.dismiss}
@@ -1712,22 +1869,18 @@ export default function WorkoutScreen() {
             </Text>
           </View>
 
-          <Pressable
-            style={
-              styles.finishButton
-            }
-            onPress={
-              finishWorkout
-            }
-          >
-            <Text
-              style={
-                styles.finishButtonText
-              }
+          <View style={styles.activeHeaderActions}>
+            <Pressable
+              disabled={exercises.length === 0}
+              style={[styles.saveCurrentButton, exercises.length === 0 && styles.savePlanDisabled]}
+              onPress={() => setSavePlanOpen(true)}
             >
-              Finish
-            </Text>
-          </Pressable>
+              <Text style={styles.saveCurrentButtonText}>Save</Text>
+            </Pressable>
+            <Pressable style={styles.finishButton} onPress={finishWorkout}>
+              <Text style={styles.finishButtonText}>Finish</Text>
+            </Pressable>
+          </View>
         </View>
 
         <WorkoutSummary
@@ -1908,7 +2061,8 @@ export default function WorkoutScreen() {
 
                 measurement={
                   getExerciseMeasurement(
-                    exercise.name
+                    exercise.name,
+                    exercise.trackingMethod
                   )
                 }
 
@@ -2198,6 +2352,21 @@ const styles =
         'center',
       gap: 12,
     },
+
+    activeHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    saveCurrentButton: { backgroundColor: colors.surface, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11 },
+    saveCurrentButtonText: { color: colors.text, fontWeight: '900' },
+    savePlanOverlay: { flex: 1, backgroundColor: 'rgba(17,24,39,0.5)', alignItems: 'center', justifyContent: 'center', padding: 24 },
+    savePlanCard: { width: '100%', maxWidth: 440, backgroundColor: colors.surface, borderRadius: 20, padding: 20 },
+    savePlanTitle: { color: colors.text, fontSize: 21, fontWeight: '900' },
+    savePlanHint: { color: colors.muted, fontSize: 13, marginTop: 6 },
+    savePlanInput: { backgroundColor: colors.soft2, borderRadius: 12, color: colors.text, fontSize: 16, marginTop: 18, paddingHorizontal: 14, paddingVertical: 13 },
+    savePlanActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 16 },
+    savePlanCancel: { paddingHorizontal: 15, paddingVertical: 12 },
+    savePlanCancelText: { color: colors.muted, fontWeight: '900' },
+    savePlanConfirm: { backgroundColor: colors.text, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12 },
+    savePlanConfirmText: { color: colors.surface, fontWeight: '900' },
+    savePlanDisabled: { opacity: 0.4 },
 
     activeTitle: {
       fontSize: 32,

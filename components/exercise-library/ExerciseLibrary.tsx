@@ -1,6 +1,8 @@
-import { useDeferredValue, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   Image,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,11 +15,14 @@ import { colors } from '../../constants/theme';
 import ExerciseDetail from './ExerciseDetail';
 import InteractiveMuscleMap, { MuscleFocusLabel } from './InteractiveMuscleMap';
 import { getExerciseImage } from './exerciseMedia';
+import { loadCustomExercises, saveCustomExercises } from '../../services/custom-exercise-storage';
+import { persistCustomExerciseImage } from '../../services/custom-exercise-image';
+import CustomExerciseForm from './CustomExerciseForm';
 
 import {
   ExerciseRecord,
   exercises,
-  searchExercises,
+  searchExerciseRecords,
 } from './exerciseData';
 
 type SelectedExerciseConfig = {
@@ -81,7 +86,7 @@ function uniqueExerciseSummary(exercise: ExerciseRecord) {
   );
 }
 function ExerciseThumbnail({ exercise }: { exercise: ExerciseRecord }) {
-  const source = getExerciseImage(exercise.id);
+  const source = exercise.image && exercise.isCustom ? { uri: exercise.image } : getExerciseImage(exercise.id);
 
   if (!source) {
     return (
@@ -103,6 +108,68 @@ function ExerciseThumbnail({ exercise }: { exercise: ExerciseRecord }) {
 export default function ExerciseLibrary({
   onSelectExercise,
 }: Props) {
+  const [customExercises, setCustomExercises] = useState<ExerciseRecord[]>([]);
+  const [customLoaded, setCustomLoaded] = useState(false);
+  const [customLoadError, setCustomLoadError] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingExercise, setEditingExercise] = useState<ExerciseRecord | null>(null);
+  useEffect(() => {
+    let active = true;
+    void loadCustomExercises().then((saved) => {
+      if (active) {
+        setCustomExercises(saved);
+        setCustomLoaded(true);
+      }
+    }).catch((error) => {
+      console.error('Failed to load custom exercises:', error);
+      if (active) setCustomLoadError(true);
+    });
+    return () => { active = false; };
+  }, []);
+  const allExercises = useMemo(() => [...customExercises, ...exercises], [customExercises]);
+
+  const saveCustomExercise = async (exercise: ExerciseRecord, imageAsset: import('expo-image-picker').ImagePickerAsset | null) => {
+    try {
+      const saved = imageAsset
+        ? { ...exercise, image: await persistCustomExerciseImage(imageAsset, exercise.id) }
+        : exercise;
+      const next = customExercises.some((item) => item.id === saved.id)
+        ? customExercises.map((item) => item.id === saved.id ? saved : item)
+        : [saved, ...customExercises];
+      await saveCustomExercises(next);
+      setCustomExercises(next);
+      setSelectedExercise((current) => current?.id === saved.id ? saved : current);
+      setFormOpen(false);
+      setEditingExercise(null);
+      setCustomLoadError(false);
+    } catch (error) {
+      console.error('Failed to save custom exercise:', error);
+      Alert.alert('Exercise not saved', 'Please try again.');
+    }
+  };
+
+  const deleteCustomExercise = (exercise: ExerciseRecord) => {
+    const remove = async () => {
+      const next = customExercises.filter((item) => item.id !== exercise.id);
+      try {
+        await saveCustomExercises(next);
+        setCustomExercises(next);
+        setSelectedExercise((current) => current?.id === exercise.id ? null : current);
+      } catch (error) {
+        console.error('Failed to delete custom exercise:', error);
+        Alert.alert('Exercise not deleted', 'Please try again.');
+      }
+    };
+    const message = 'This removes the exercise from your library. Past workout records stay saved.';
+    if (Platform.OS === 'web') {
+      if (window.confirm(`Delete ${exercise.name}?\n\n${message}`)) void remove();
+    } else {
+      Alert.alert(`Delete ${exercise.name}?`, message, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => void remove() },
+      ]);
+    }
+  };
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query);
 
@@ -124,7 +191,7 @@ export default function ExerciseLibrary({
   };
 
   const filteredExercises = useMemo(() => {
-    let results = searchExercises(deferredQuery);
+    let results = searchExerciseRecords(allExercises, deferredQuery);
 
     if (selectedMuscles.length > 0) {
       results = results.filter((exercise) =>
@@ -142,7 +209,7 @@ export default function ExerciseLibrary({
     }
 
     return results.slice(0, 100);
-  }, [deferredQuery, selectedEquipment, selectedMuscles]);
+  }, [allExercises, deferredQuery, selectedEquipment, selectedMuscles]);
 
   const activeFilters = [
     ...selectedMuscles.map((muscle) => ({
@@ -168,7 +235,7 @@ export default function ExerciseLibrary({
   };
 
   const equipmentOptions = useMemo(() => {
-    const options = exercises
+    const options = allExercises
       .map((exercise) => exercise.equipment)
       .filter(
         (value): value is string =>
@@ -185,7 +252,15 @@ export default function ExerciseLibrary({
 
       return left.localeCompare(right);
     });
-  }, []);
+  }, [allExercises]);
+
+  if (formOpen) {
+    return <CustomExerciseForm
+      initial={editingExercise}
+      onSave={saveCustomExercise}
+      onCancel={() => { setFormOpen(false); setEditingExercise(null); }}
+    />;
+  }
 
   if (selectedExercise) {
     return (
@@ -220,8 +295,21 @@ export default function ExerciseLibrary({
       </Text>
 
       <Text style={styles.subtitle}>
-        Search {exercises.length} exercises
+        Search {allExercises.length} exercises
       </Text>
+      <Pressable
+        accessibilityRole="button"
+        disabled={!customLoaded}
+        style={[styles.createCustomButton, !customLoaded && styles.createCustomDisabled]}
+        onPress={() => { setEditingExercise(null); setFormOpen(true); }}
+      >
+        <Text style={styles.createCustomText}>+ Create Custom Exercise</Text>
+      </Pressable>
+      {customLoadError ? (
+        <Pressable onPress={() => void loadCustomExercises().then((saved) => { setCustomExercises(saved); setCustomLoadError(false); setCustomLoaded(true); }).catch((error) => console.error('Failed to retry custom exercises:', error))}>
+          <Text style={styles.loadError}>Custom exercises could not be loaded. Tap to retry.</Text>
+        </Pressable>
+      ) : !customLoaded ? <Text style={styles.loadError}>Loading your exercises…</Text> : null}
 
       <View style={styles.musclePickerCard}>
         <View style={styles.musclePickerHeader}>
@@ -412,7 +500,7 @@ export default function ExerciseLibrary({
               onPress={() => setSelectedExercise(exercise)}
             >
               <Text style={styles.exerciseName}>
-                {exercise.name}
+                {exercise.name}{exercise.isCustom ? '  ·  Custom' : ''}
               </Text>
 
               <Text style={styles.exerciseMeta}>
@@ -421,6 +509,16 @@ export default function ExerciseLibrary({
             </Pressable>
 
             <View style={styles.exerciseActions}>
+              {exercise.isCustom ? (
+                <View>
+                  <Pressable accessibilityRole="button" accessibilityLabel={`Edit ${exercise.name}`} style={styles.viewButton} onPress={() => { setEditingExercise(exercise); setFormOpen(true); }}>
+                    <Text style={styles.detailsText}>Edit</Text>
+                  </Pressable>
+                  <Pressable accessibilityRole="button" accessibilityLabel={`Delete ${exercise.name}`} style={styles.viewButton} onPress={() => deleteCustomExercise(exercise)}>
+                    <Text style={styles.deleteText}>Delete</Text>
+                  </Pressable>
+                </View>
+              ) : null}
               <Pressable
                 accessibilityLabel={`View ${exercise.name} details`}
                 accessibilityRole="button"
@@ -472,6 +570,11 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 13,
   },
+  createCustomButton: { backgroundColor: colors.text, borderRadius: 13, paddingVertical: 13, alignItems: 'center' },
+  createCustomDisabled: { opacity: 0.4 },
+  createCustomText: { color: colors.surface, fontWeight: '900' },
+  loadError: { color: '#B91C1C', fontSize: 12, marginTop: 8 },
+  deleteText: { color: '#B91C1C', fontWeight: '800', fontSize: 12 },
 
   searchInput: {
     marginTop: 14,

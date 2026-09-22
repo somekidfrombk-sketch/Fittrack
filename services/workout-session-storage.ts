@@ -5,6 +5,7 @@ import { withStorageLock } from './storage-lock';
 
 export type WorkoutSession = {
   startedAt: number;
+  workoutDate?: string | null;
   exercises: WorkoutExercise[];
   workoutIntensity: WorkoutIntensity;
   exerciseRestTimes: Record<string, number>;
@@ -31,6 +32,7 @@ export function loadWorkoutSession(profileId: string): Promise<WorkoutSession | 
     const value = JSON.parse(raw) as WorkoutSession | null;
     if (value === null) return null;
     if (!value || !Number.isFinite(value.startedAt) || value.startedAt <= 0 ||
+      !(value.workoutDate === undefined || value.workoutDate === null || typeof value.workoutDate === 'string') ||
       !['light', 'moderate', 'vigorous'].includes(value.workoutIntensity) ||
       !Array.isArray(value.exercises) || !value.exercises.every(exercise =>
         exercise && typeof exercise.id === 'string' && typeof exercise.name === 'string' &&

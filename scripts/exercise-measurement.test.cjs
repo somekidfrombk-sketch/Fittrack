@@ -74,3 +74,23 @@ test('exercise measurements infer weighted, bodyweight, and duration inputs from
   assert.equal(duration.primaryLabel, 'TIME');
   assert.equal(duration.secondaryLabel, null);
 });
+
+test('custom tracking methods use only their selected measurement fields', () => {
+  const { getExerciseMeasurement } = loadModule('components/workout/exerciseMeasurement.ts');
+  assert.deepEqual(
+    ['weight_reps', 'reps', 'duration', 'distance', 'distance_time', 'bodyweight_reps', 'none']
+      .map((method) => {
+        const measurement = getExerciseMeasurement('Custom movement', method);
+        return [measurement.primaryField, measurement.secondaryLabel];
+      }),
+    [
+      ['weight', 'REPS'],
+      ['reps', null],
+      ['reps', null],
+      ['weight', null],
+      ['weight', 'TIME'],
+      ['reps', null],
+      [null, null],
+    ]
+  );
+});

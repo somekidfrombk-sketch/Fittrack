@@ -76,12 +76,14 @@ export default function ExerciseDetail({
 
   const exerciseGif =
     getExerciseGif(exercise.id);
+  const tracksReps = !exercise.trackingMethod ||
+    ['weight_reps', 'reps', 'bodyweight_reps'].includes(exercise.trackingMethod);
 
   const productUrl =
     getExerciseProductUrl(exercise.id);
 
   const mediaSource =
-    exerciseGif || exerciseImage;
+    exercise.isCustom && exercise.image ? { uri: exercise.image } : exerciseGif || exerciseImage;
 
   const metadata = getUniqueMetadata(exercise);
 
@@ -211,7 +213,7 @@ export default function ExerciseDetail({
           </View>
         )}
 
-        <View style={styles.mediaBadge}>
+        {mediaSource ? <View style={styles.mediaBadge}>
           <Text
             style={styles.mediaBadgeText}
           >
@@ -219,7 +221,7 @@ export default function ExerciseDetail({
               ? 'Animated demonstration'
               : 'Exercise image'}
           </Text>
-        </View>
+        </View> : null}
 
         {productUrl ? (
           <Pressable
@@ -298,7 +300,7 @@ export default function ExerciseDetail({
             </View>
           </View>
 
-          <View style={styles.controlCard}>
+          {tracksReps ? <View style={styles.controlCard}>
             <Text style={styles.controlLabel}>
               Reps
             </Text>
@@ -346,7 +348,7 @@ export default function ExerciseDetail({
                 </Text>
               </Pressable>
             </View>
-          </View>
+          </View> : null}
 
           <View style={styles.controlCard}>
             <Text style={styles.controlLabel}>

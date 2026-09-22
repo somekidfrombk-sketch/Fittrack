@@ -1,5 +1,6 @@
 import {
   ExerciseRecord,
+  ExerciseTrackingMethod,
   exercises,
 } from '../exercise-library/exerciseData';
 
@@ -7,11 +8,14 @@ export type ExerciseMeasurementKind =
   | 'weighted'
   | 'bodyweight'
   | 'duration'
-  | 'distance';
+  | 'distance'
+  | 'reps'
+  | 'none';
 
 export type ExerciseMeasurement = {
   kind: ExerciseMeasurementKind;
-  primaryLabel: string;
+  primaryLabel: string | null;
+  primaryField: 'weight' | 'reps' | null;
   secondaryLabel: string | null;
   primaryPlaceholder: string;
   secondaryPlaceholder: string | null;
@@ -131,8 +135,26 @@ function usesDistance(
 }
 
 export function getExerciseMeasurement(
-  exerciseName: string
+  exerciseName: string,
+  trackingMethod?: ExerciseTrackingMethod
 ): ExerciseMeasurement {
+  if (trackingMethod) {
+    switch (trackingMethod) {
+      case 'weight_reps':
+        return { kind: 'weighted', primaryLabel: 'WEIGHT', primaryField: 'weight', secondaryLabel: 'REPS', primaryPlaceholder: 'lb', secondaryPlaceholder: '0', primaryKeyboard: 'decimal-pad', secondaryKeyboard: 'number-pad' };
+      case 'reps':
+      case 'bodyweight_reps':
+        return { kind: trackingMethod === 'reps' ? 'reps' : 'bodyweight', primaryLabel: 'REPS', primaryField: 'reps', secondaryLabel: null, primaryPlaceholder: '0', secondaryPlaceholder: null, primaryKeyboard: 'number-pad', secondaryKeyboard: null };
+      case 'duration':
+        return { kind: 'duration', primaryLabel: 'TIME', primaryField: 'reps', secondaryLabel: null, primaryPlaceholder: 'sec', secondaryPlaceholder: null, primaryKeyboard: 'decimal-pad', secondaryKeyboard: null };
+      case 'distance':
+        return { kind: 'distance', primaryLabel: 'DISTANCE', primaryField: 'weight', secondaryLabel: null, primaryPlaceholder: 'mi', secondaryPlaceholder: null, primaryKeyboard: 'decimal-pad', secondaryKeyboard: null };
+      case 'distance_time':
+        return { kind: 'distance', primaryLabel: 'DISTANCE', primaryField: 'weight', secondaryLabel: 'TIME', primaryPlaceholder: 'mi', secondaryPlaceholder: 'min', primaryKeyboard: 'decimal-pad', secondaryKeyboard: 'decimal-pad' };
+      case 'none':
+        return { kind: 'none', primaryLabel: null, primaryField: null, secondaryLabel: null, primaryPlaceholder: '', secondaryPlaceholder: null, primaryKeyboard: 'number-pad', secondaryKeyboard: null };
+    }
+  }
   const text = metadataText(
     getExerciseByName(exerciseName)
   );
@@ -141,6 +163,7 @@ export function getExerciseMeasurement(
     return {
       kind: 'distance',
       primaryLabel: 'DISTANCE',
+      primaryField: 'weight',
       secondaryLabel: 'TIME',
       primaryPlaceholder: 'mi',
       secondaryPlaceholder: 'min',
@@ -156,6 +179,7 @@ export function getExerciseMeasurement(
     return {
       kind: 'duration',
       primaryLabel: 'TIME',
+      primaryField: 'reps',
       secondaryLabel: null,
       primaryPlaceholder: 'sec',
       secondaryPlaceholder: null,
@@ -171,6 +195,7 @@ export function getExerciseMeasurement(
     return {
       kind: 'bodyweight',
       primaryLabel: 'REPS',
+      primaryField: 'reps',
       secondaryLabel: null,
       primaryPlaceholder: '0',
       secondaryPlaceholder: null,
@@ -182,6 +207,7 @@ export function getExerciseMeasurement(
   return {
     kind: 'weighted',
     primaryLabel: 'WEIGHT',
+    primaryField: 'weight',
     secondaryLabel: 'REPS',
     primaryPlaceholder: '0',
     secondaryPlaceholder: '0',

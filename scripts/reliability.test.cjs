@@ -70,6 +70,30 @@ test('corrupted collections are not overwritten by saves', async () => {
   }
 });
 
+test('custom exercises and saved workouts survive reloads without overwriting invalid data', async () => {
+  const h = harness();
+  const custom = h.load('services/custom-exercise-storage.ts');
+  const plans = h.load('services/workout-plan-storage.ts');
+  const exercise = {
+    id: 'custom-1', name: 'My carry', isCustom: true,
+    muscle_group: 'Core', equipment: 'Dumbbell', category: 'Strength',
+    trackingMethod: 'distance',
+  };
+  await custom.saveCustomExercises([exercise]);
+  assert.deepEqual(await custom.loadCustomExercises(), [exercise]);
+  const plan = { id: 'plan-1', name: 'Carry day', days: [], exercises: [] };
+  await plans.saveWorkoutPlans('profile-a', [plan]);
+  assert.deepEqual(await plans.loadWorkoutPlans('profile-a'), [plan]);
+  assert.deepEqual(await plans.loadWorkoutPlans('profile-b'), []);
+
+  h.data.set('fittrack_custom_exercises:v1', '{}');
+  await assert.rejects(custom.saveCustomExercises([]));
+  assert.equal(h.data.get('fittrack_custom_exercises:v1'), '{}');
+  h.data.set('fittrack_workout_plans:profile-a', '{}');
+  await assert.rejects(plans.saveWorkoutPlans('profile-a', []));
+  assert.equal(h.data.get('fittrack_workout_plans:profile-a'), '{}');
+});
+
 test('parallel favorites deduplicate and vitamins stay profile scoped', async () => {
   const h = harness();
   const favorites = h.load('services/food-favorites-storage.ts');

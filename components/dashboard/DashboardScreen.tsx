@@ -28,6 +28,7 @@ import { VitaminEntry } from '../../types/vitamin';
 import { localDateKey } from '../../utils/date';
 import { estimateStepCalories } from '../../utils/step-calories';
 import MetricCard from './MetricCard';
+import WorkoutCalendar from './WorkoutCalendar';
 
 export default function DashboardScreen() {
   const [profile, setProfile] = useState<Partial<ProfileData> | null>(null);
@@ -207,6 +208,10 @@ export default function DashboardScreen() {
     router.push('/vitamins');
   };
 
+  const addWorkoutForDate = (date: string) => {
+    router.push({ pathname: '/(tabs)/workout', params: { date, requestId: String(Date.now()) } });
+  };
+
   return (
     <ScrollView
       contentContainerStyle={styles.container}
@@ -253,6 +258,11 @@ export default function DashboardScreen() {
       <Text style={styles.subtitle}>
         Today
       </Text>
+
+      <WorkoutCalendar
+        workoutDates={workouts.map((workout) => localDateKey(new Date(workout.date)))}
+        onAddWorkout={addWorkoutForDate}
+      />
 
       {/* CALORIES */}
 
