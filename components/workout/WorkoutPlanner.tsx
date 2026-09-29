@@ -13,6 +13,8 @@ import { MuscleRecency } from './muscleRecency';
 import TodayWorkoutCard from './TodayWorkoutCard';
 import WorkoutBuilder from './WorkoutBuilder';
 import WorkoutPlanCard from './WorkoutPlanCard';
+import { starterWorkoutPlans } from './starterWorkoutPlans';
+import { createId } from './workoutUtils';
 
 type Props = {
   plans: WorkoutPlan[];
@@ -72,6 +74,16 @@ export default function WorkoutPlanner({
         (plan) => plan.id !== planId
       )
     );
+  };
+
+  const saveStarterPlan = (starter: WorkoutPlan) => {
+    if (plans.some((plan) => plan.starterId === starter.id)) return;
+    onPlansChange([...plans, {
+      ...starter,
+      id: createId(),
+      starterId: starter.id,
+      exercises: starter.exercises.map((exercise) => ({ ...exercise, id: createId() })),
+    }]);
   };
 
   if (buildingWorkout) {
@@ -175,6 +187,21 @@ export default function WorkoutPlanner({
           ›
         </Text>
       </Pressable>
+
+      <View style={styles.starterHeader}>
+        <Text style={styles.sectionTitle}>Try a Workout</Text>
+        <Text style={styles.sectionSubtitle}>Start now or save one to Your Workout Plans.</Text>
+      </View>
+      {starterWorkoutPlans.map((starter) => (
+        <WorkoutPlanCard
+          key={starter.id}
+          plan={starter}
+          onStart={() => onStartPlan(starter)}
+          onSave={() => saveStarterPlan(starter)}
+          saved={plans.some((plan) => plan.starterId === starter.id)}
+          getExerciseRecency={getExerciseRecency}
+        />
+      ))}
     </View>
   );
 }
@@ -183,6 +210,7 @@ const styles = StyleSheet.create({
   sectionHeader: {
     marginBottom: 12,
   },
+  starterHeader: { marginTop: 26, marginBottom: 12 },
 
   sectionTitle: {
     fontSize: 22,

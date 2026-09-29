@@ -12,6 +12,9 @@ export type WorkoutHistoryExercise = {
   name: string;
   trackingMethod?: import('../components/exercise-library/exerciseData').ExerciseTrackingMethod;
   exerciseLibraryId?: string;
+  muscleGroup?: string;
+  muscleGroups?: string[];
+  comment?: string;
   sets: WorkoutHistorySet[];
 };
 

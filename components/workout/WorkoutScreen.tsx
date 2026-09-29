@@ -61,6 +61,7 @@ import ExerciseCard from './ExerciseCard';
 import WorkoutHistory from './WorkoutHistory';
 import WorkoutPlanner from './WorkoutPlanner';
 import WorkoutSummary from './WorkoutSummary';
+import { exercisesFromHistoryTemplate, planFromHistoryTemplate } from './workoutTemplate';
 
 import {
   createId,
@@ -88,6 +89,9 @@ export default function WorkoutScreen() {
     useState('');
   const [startedAt, setStartedAt] =
     useState<number | null>(null);
+  const [pausedAt, setPausedAt] = useState<number | null>(null);
+  const [pausedDurationMs, setPausedDurationMs] = useState(0);
+  const [pausedRestSeconds, setPausedRestSeconds] = useState<number | null>(null);
 
   const [elapsedSeconds, setElapsedSeconds] =
     useState(0);
@@ -107,6 +111,9 @@ export default function WorkoutScreen() {
   const [savePlanOpen, setSavePlanOpen] = useState(false);
   const [savePlanName, setSavePlanName] = useState('');
   const [savingPlan, setSavingPlan] = useState(false);
+  const [historyTemplateEntry, setHistoryTemplateEntry] = useState<WorkoutHistoryEntry | null>(null);
+  const [historyTemplateName, setHistoryTemplateName] = useState('');
+  const [savingHistoryTemplate, setSavingHistoryTemplate] = useState(false);
   const [plansLoadError, setPlansLoadError] = useState(false);
 
   const [history, setHistory] =
@@ -146,23 +153,56 @@ export default function WorkoutScreen() {
   ] = useState<WorkoutExercise | null>(null);
 
   const startRestTimer = useCallback((seconds: number) => {
+    if (pausedAt !== null) {
+      setPausedRestSeconds(seconds);
+      setRestEndsAt(null);
+      resetTimer();
+      return;
+    }
     setRestEndsAt(Date.now() + seconds * 1000);
     startTimer(seconds);
-  }, [startTimer]);
+  }, [pausedAt, resetTimer, startTimer]);
   const resetRestTimer = () => {
     setRestEndsAt(null);
+    setPausedRestSeconds(null);
     resetTimer();
+  };
+
+  const workoutSeconds = useCallback((now: number) => startedAt === null ? 0 : Math.max(0,
+    Math.floor(((pausedAt ?? now) - startedAt - pausedDurationMs) / 1000)),
+  [startedAt, pausedAt, pausedDurationMs]);
+
+  const toggleWorkoutPause = () => {
+    if (pausedAt !== null) {
+      const now = Date.now();
+      setPausedDurationMs((duration) => duration + Math.max(0, now - pausedAt));
+      setPausedAt(null);
+      if (pausedRestSeconds !== null && pausedRestSeconds > 0) {
+        setRestEndsAt(now + pausedRestSeconds * 1000);
+        startTimer(pausedRestSeconds);
+      }
+      setPausedRestSeconds(null);
+    } else {
+      const now = Date.now();
+      setElapsedSeconds(workoutSeconds(now));
+      setPausedAt(now);
+      if (restEndsAt !== null) {
+        resetRestTimer();
+        setPausedRestSeconds(Math.max(0, Math.ceil((restEndsAt - now) / 1000)));
+      }
+    }
   };
 
   useLayoutEffect(() => {
     if (!sessionLoaded || !profileId) return;
     void saveWorkoutSession(profileId, startedAt === null ? null : {
       startedAt, exercises, workoutIntensity, exerciseRestTimes, prSetIds, restEndsAt, workoutDate,
+      pausedAt, pausedDurationMs, pausedRestSeconds,
     }).then(() => setSessionSaveError(false)).catch(error => {
       console.error('Failed to save active workout:', error);
       setSessionSaveError(true);
     });
-  }, [sessionLoaded, profileId, startedAt, exercises, workoutIntensity, exerciseRestTimes, prSetIds, restEndsAt, workoutDate]);
+  }, [sessionLoaded, profileId, startedAt, exercises, workoutIntensity, exerciseRestTimes, prSetIds, restEndsAt, workoutDate, pausedAt, pausedDurationMs, pausedRestSeconds]);
 
   /*
    * LOAD WORKOUT HISTORY
@@ -189,6 +229,9 @@ export default function WorkoutScreen() {
         if (cancelled) return;
         if (session && !savedHistory.some(entry => entry.id === `session-${session.startedAt}`)) {
           setStartedAt(session.startedAt);
+          setPausedAt(session.pausedAt ?? null);
+          setPausedDurationMs(session.pausedDurationMs ?? 0);
+          setPausedRestSeconds(session.pausedRestSeconds ?? null);
           setWorkoutDate(session.workoutDate ?? null);
           setExercises(session.exercises);
           setWorkoutIntensity(session.workoutIntensity);
@@ -230,6 +273,9 @@ export default function WorkoutScreen() {
         localDateKey(new Date(`${requestedDate}T12:00:00`)) === requestedDate) {
       const timer = setTimeout(() => {
         setStartedAt(Date.now());
+        setPausedAt(null);
+        setPausedDurationMs(0);
+        setPausedRestSeconds(null);
         setWorkoutDate(requestedDate);
         setElapsedSeconds(0);
         setExercises([]);
@@ -298,11 +344,7 @@ export default function WorkoutScreen() {
     }
 
     const refreshElapsed = () => {
-      setElapsedSeconds(
-        Math.floor(
-          (Date.now() - startedAt) / 1000
-        )
-      );
+      setElapsedSeconds(workoutSeconds(Date.now()));
     };
 
     refreshElapsed();
@@ -320,7 +362,7 @@ export default function WorkoutScreen() {
       clearInterval(timer);
       subscription.remove();
     };
-  }, [startedAt]);
+  }, [startedAt, workoutSeconds]);
 
   /*
    * COMPLETED SETS
@@ -545,6 +587,9 @@ export default function WorkoutScreen() {
 
   const resetWorkoutState = () => {
     setStartedAt(null);
+    setPausedAt(null);
+    setPausedDurationMs(0);
+    setPausedRestSeconds(null);
     setWorkoutDate(null);
     setElapsedSeconds(0);
     setWorkoutIntensity('moderate');
@@ -564,6 +609,9 @@ export default function WorkoutScreen() {
 
   const startEmptyWorkout = (date = localDateKey()) => {
     setStartedAt(Date.now());
+    setPausedAt(null);
+    setPausedDurationMs(0);
+    setPausedRestSeconds(null);
     setWorkoutDate(date);
     setElapsedSeconds(0);
 
@@ -591,6 +639,8 @@ export default function WorkoutScreen() {
         id: createId(),
         name: exercise.name,
         exerciseLibraryId: exercise.exerciseLibraryId,
+        muscleGroup: exercise.muscleGroup,
+        muscleGroups: exercise.muscleGroups,
         trackingMethod: exercise.trackingMethod,
         image: exercise.image,
         targetSets: String(exercise.sets.length),
@@ -734,6 +784,8 @@ export default function WorkoutScreen() {
               plannedExercise.name,
 
             exerciseLibraryId: plannedExercise.exerciseLibraryId,
+            muscleGroup: plannedExercise.muscleGroup,
+            muscleGroups: plannedExercise.muscleGroups,
             trackingMethod: plannedExercise.trackingMethod,
             image: plannedExercise.image,
 
@@ -751,6 +803,9 @@ export default function WorkoutScreen() {
     );
 
     setStartedAt(Date.now());
+    setPausedAt(null);
+    setPausedDurationMs(0);
+    setPausedRestSeconds(null);
     setElapsedSeconds(0);
 
     setExerciseLibraryOpen(false);
@@ -758,6 +813,53 @@ export default function WorkoutScreen() {
     resetRestTimer();
 
     setPrSetIds([]);
+  };
+
+  const startWorkoutFromHistory = (entry: WorkoutHistoryEntry) => {
+    const copiedExercises = exercisesFromHistoryTemplate(entry, createId);
+    if (copiedExercises.length === 0) {
+      Alert.alert('No exercises to reuse', 'This workout has no exercises to use as a template.');
+      return;
+    }
+    setWorkoutDate(localDateKey());
+    setExercises(copiedExercises);
+    setExerciseRestTimes(Object.fromEntries(copiedExercises.map((exercise) => [exercise.id, 60])));
+    setWorkoutIntensity(entry.intensity ?? 'moderate');
+    setStartedAt(Date.now());
+    setPausedAt(null);
+    setPausedDurationMs(0);
+    setPausedRestSeconds(null);
+    setElapsedSeconds(0);
+    setExerciseLibraryOpen(false);
+    resetRestTimer();
+    setPrSetIds([]);
+  };
+
+  const saveHistoryAsTemplate = async () => {
+    const name = historyTemplateName.trim();
+    if (!historyTemplateEntry || !name || savingHistoryTemplate || !profileId) return;
+    if (plansLoadError) {
+      Alert.alert('Saved workouts unavailable', 'Reopen the Workout screen and try again.');
+      return;
+    }
+    const plan = planFromHistoryTemplate(historyTemplateEntry, name, createId);
+    if (plan.exercises.length === 0) {
+      Alert.alert('No exercises to save', 'This workout has no exercises to use as a template.');
+      return;
+    }
+    setSavingHistoryTemplate(true);
+    try {
+      await saveWorkoutPlans(profileId, [...plans, plan]);
+      setPlans((current) => [...current, plan]);
+      setHistoryTemplateEntry(null);
+      setHistoryTemplateName('');
+      Alert.alert('Template saved', 'Find it in Your Workout Plans.');
+    } catch (error) {
+      console.error('Failed to save history as workout plan:', error);
+      Alert.alert('Template not saved', 'Please try again.');
+    } finally {
+      setSavingHistoryTemplate(false);
+    }
   };
 
   /*
@@ -812,6 +914,8 @@ export default function WorkoutScreen() {
         name:
           exercise.name,
         exerciseLibraryId: exercise.id,
+        muscleGroup: exercise.isCustom ? exercise.muscle_group : exercise.target,
+        muscleGroups: exercise.isCustom ? exercise.muscleGroups : undefined,
         trackingMethod: exercise.trackingMethod,
         image: exercise.isCustom ? exercise.image : undefined,
 
@@ -908,7 +1012,7 @@ export default function WorkoutScreen() {
             : new Date().toISOString(),
 
         durationSeconds:
-          elapsedSeconds,
+          workoutSeconds(Date.now()),
 
         totalVolume,
 
@@ -935,6 +1039,9 @@ export default function WorkoutScreen() {
                 exercise.name,
               trackingMethod: exercise.trackingMethod,
               exerciseLibraryId: exercise.exerciseLibraryId,
+              muscleGroup: exercise.muscleGroup,
+              muscleGroups: exercise.muscleGroups,
+              comment: exercise.comment?.trim() || undefined,
 
               sets:
                 exercise.sets.map(
@@ -1137,6 +1244,11 @@ export default function WorkoutScreen() {
           }
         )
     );
+  };
+
+  const updateExerciseComment = (exerciseId: string, comment: string) => {
+    setExercises((current) => current.map((exercise) =>
+      exercise.id === exerciseId ? { ...exercise, comment } : exercise));
   };
 
   /*
@@ -1556,6 +1668,40 @@ export default function WorkoutScreen() {
             : undefined
         }
       >
+        <Modal
+          animationType="fade"
+          transparent
+          visible={historyTemplateEntry !== null}
+          onRequestClose={() => setHistoryTemplateEntry(null)}
+        >
+          <View style={styles.savePlanOverlay}>
+            <View style={styles.savePlanCard}>
+              <Text style={styles.savePlanTitle}>Save Workout Template</Text>
+              <Text style={styles.savePlanHint}>Name this history workout to reuse it from Your Workout Plans.</Text>
+              <TextInput
+                value={historyTemplateName}
+                onChangeText={setHistoryTemplateName}
+                placeholder="Template name"
+                placeholderTextColor={colors.lightMuted}
+                style={styles.savePlanInput}
+                returnKeyType="done"
+                onSubmitEditing={() => void saveHistoryAsTemplate()}
+              />
+              <View style={styles.savePlanActions}>
+                <Pressable onPress={() => setHistoryTemplateEntry(null)} style={styles.savePlanCancel}>
+                  <Text style={styles.savePlanCancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  disabled={!historyTemplateName.trim() || savingHistoryTemplate}
+                  onPress={() => void saveHistoryAsTemplate()}
+                  style={[styles.savePlanConfirm, (!historyTemplateName.trim() || savingHistoryTemplate) && styles.savePlanDisabled]}
+                >
+                  <Text style={styles.savePlanConfirmText}>{savingHistoryTemplate ? 'Saving…' : 'Save Template'}</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
         <TouchableWithoutFeedback
           accessible={false}
           onPress={Keyboard.dismiss}
@@ -1696,6 +1842,8 @@ export default function WorkoutScreen() {
           onDeleteEntry={
             deleteHistoryEntry
           }
+          onUseAsTemplate={startWorkoutFromHistory}
+          onSaveAsTemplate={(entry) => { setHistoryTemplateName(''); setHistoryTemplateEntry(entry); }}
         />
       </ScrollView>
         </TouchableWithoutFeedback>
@@ -1865,11 +2013,14 @@ export default function WorkoutScreen() {
                 styles.activeTitle
               }
             >
-              Active Workout
+              {pausedAt !== null ? 'Workout Paused' : 'Active Workout'}
             </Text>
           </View>
 
           <View style={styles.activeHeaderActions}>
+            <Pressable accessibilityRole="button" style={styles.saveCurrentButton} onPress={toggleWorkoutPause}>
+              <Text style={styles.saveCurrentButtonText}>{pausedAt !== null ? 'Resume' : 'Pause'}</Text>
+            </Pressable>
             <Pressable
               disabled={exercises.length === 0}
               style={[styles.saveCurrentButton, exercises.length === 0 && styles.savePlanDisabled]}
@@ -1907,7 +2058,9 @@ export default function WorkoutScreen() {
             setWorkoutIntensity
           }
           restTime={
-            restActive
+            pausedRestSeconds !== null
+              ? formatRestTime(pausedRestSeconds)
+              : restActive
               ? formatRestTime(
                   restSecondsLeft
                 )
@@ -1916,7 +2069,7 @@ export default function WorkoutScreen() {
                 : 'Ready'
           }
           restActive={
-            restActive
+            restActive || pausedRestSeconds !== null
           }
           restComplete={
             restComplete
@@ -2153,6 +2306,8 @@ export default function WorkoutScreen() {
                   )
                 }
 
+                onUpdateComment={(comment) => updateExerciseComment(exercise.id, comment)}
+
                 onToggleSetComplete={(
                   setId
                 ) =>
@@ -2353,7 +2508,7 @@ const styles =
       gap: 12,
     },
 
-    activeHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    activeHeaderActions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center', gap: 8 },
     saveCurrentButton: { backgroundColor: colors.surface, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11 },
     saveCurrentButtonText: { color: colors.text, fontWeight: '900' },
     savePlanOverlay: { flex: 1, backgroundColor: 'rgba(17,24,39,0.5)', alignItems: 'center', justifyContent: 'center', padding: 24 },

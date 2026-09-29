@@ -34,6 +34,7 @@ type Props = {
   ) => void;
 
   onToggleSetComplete: (setId: string) => void;
+  onUpdateComment: (value: string) => void;
 };
 
 function cleanValue(
@@ -68,6 +69,7 @@ export default function ExerciseCard({
   onMoveSetDown,
   onUpdateSet,
   onToggleSetComplete,
+  onUpdateComment,
 }: Props) {
   const hasSecondaryInput = Boolean(
     measurement.secondaryLabel
@@ -325,11 +327,24 @@ export default function ExerciseCard({
           + Add Set
         </Text>
       </Pressable>
+      <Text style={styles.commentLabel}>Exercise comment</Text>
+      <TextInput
+        accessibilityLabel={`Comment on ${exercise.name}`}
+        value={exercise.comment ?? ''}
+        onChangeText={onUpdateComment}
+        multiline
+        maxLength={1000}
+        placeholder="Add a note about this exercise…"
+        placeholderTextColor={colors.lightMuted}
+        style={styles.commentInput}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  commentLabel: { color: colors.text, fontSize: 12, fontWeight: '900', marginTop: 14, marginBottom: 7 },
+  commentInput: { backgroundColor: colors.soft2, borderRadius: 12, color: colors.text, fontSize: 13, minHeight: 72, paddingHorizontal: 12, paddingVertical: 10, textAlignVertical: 'top' },
   card: {
     backgroundColor: colors.surface,
     borderRadius: 22,

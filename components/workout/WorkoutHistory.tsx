@@ -25,6 +25,8 @@ function formatSet(exercise: WorkoutHistoryEntry['exercises'][number], set: Work
 type Props = {
   history: WorkoutHistoryEntry[];
   onDeleteEntry: (entryId: string) => void;
+  onUseAsTemplate: (entry: WorkoutHistoryEntry) => void;
+  onSaveAsTemplate: (entry: WorkoutHistoryEntry) => void;
 };
 
 function formatDuration(seconds: number) {
@@ -54,6 +56,8 @@ function formatWorkoutDate(date: string) {
 export default function WorkoutHistory({
   history,
   onDeleteEntry,
+  onUseAsTemplate,
+  onSaveAsTemplate,
 }: Props) {
   return (
     <View>
@@ -103,15 +107,17 @@ export default function WorkoutHistory({
                 </Text>
               </View>
 
-              <Pressable
-                onPress={() =>
-                  onDeleteEntry(entry.id)
-                }
-              >
-                <Text style={styles.deleteText}>
-                  Delete
-                </Text>
-              </Pressable>
+              <View style={styles.cardActions}>
+                <Pressable accessibilityRole="button" onPress={() => onUseAsTemplate(entry)} style={styles.templateButton}>
+                  <Text style={styles.templateButtonText}>Use as template</Text>
+                </Pressable>
+                <Pressable accessibilityRole="button" onPress={() => onSaveAsTemplate(entry)} style={styles.saveTemplateButton}>
+                  <Text style={styles.saveTemplateButtonText}>Save as template</Text>
+                </Pressable>
+                <Pressable onPress={() => onDeleteEntry(entry.id)}>
+                  <Text style={styles.deleteText}>Delete</Text>
+                </Pressable>
+              </View>
             </View>
 
             <View style={styles.statsRow}>
@@ -175,6 +181,7 @@ export default function WorkoutHistory({
                   <Text style={styles.exerciseName}>
                     {index + 1}. {exercise.name}
                   </Text>
+                  {exercise.comment ? <Text style={styles.exerciseComment}>{exercise.comment}</Text> : null}
 
                   {exercise.sets.map((set, setIndex) => (
                     <Text
@@ -252,6 +259,12 @@ const styles = StyleSheet.create({
     gap: 12,
   },
 
+  cardActions: { alignItems: 'flex-end', gap: 10 },
+  templateButton: { backgroundColor: colors.text, borderRadius: 10, paddingHorizontal: 11, paddingVertical: 9 },
+  templateButtonText: { color: colors.surface, fontSize: 11, fontWeight: '900' },
+  saveTemplateButton: { backgroundColor: colors.soft, borderRadius: 10, paddingHorizontal: 11, paddingVertical: 9 },
+  saveTemplateButtonText: { color: colors.text, fontSize: 11, fontWeight: '900' },
+
   date: {
     fontSize: 18,
     fontWeight: '900',
@@ -319,6 +332,7 @@ const styles = StyleSheet.create({
     color: colors.text,
     marginBottom: 6,
   },
+  exerciseComment: { color: colors.text, fontSize: 12, lineHeight: 18, marginBottom: 7 },
 
   setText: {
     fontSize: 12,

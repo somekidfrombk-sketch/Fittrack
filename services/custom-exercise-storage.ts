@@ -13,6 +13,7 @@ function isCustomExercise(value: unknown): value is ExerciseRecord {
   return item.isCustom === true && typeof item.id === 'string' && typeof item.name === 'string' &&
     typeof item.muscle_group === 'string' && typeof item.equipment === 'string' &&
     typeof item.category === 'string' && methods.includes(item.trackingMethod as ExerciseTrackingMethod) &&
+    (item.muscleGroups === undefined || Array.isArray(item.muscleGroups) && item.muscleGroups.every(group => typeof group === 'string')) &&
     (item.image === undefined || typeof item.image === 'string') &&
     (item.instructions === undefined || typeof item.instructions?.en === 'string');
 }

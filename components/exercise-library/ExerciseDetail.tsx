@@ -43,7 +43,7 @@ function getUniqueMetadata(exercise: ExerciseRecord) {
     { label: 'Body', value: exercise.body_part },
     { label: 'Category', value: exercise.category },
     { label: 'Equipment', value: exercise.equipment },
-    { label: 'Muscle', value: exercise.muscle_group },
+    { label: 'Muscles worked', value: exercise.muscleGroups?.join(', ') || exercise.muscle_group },
   ].filter((item): item is { label: string; value: string } => {
     if (!item.value) return false;
 

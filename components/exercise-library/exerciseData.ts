@@ -1,5 +1,6 @@
 import exercisesJson from '../../assets/exercises/exercises.en.json';
 import { hammerStrengthExercises } from './hammerStrengthData';
+import { curatedExercises } from './curatedExercises';
 
 export type LocalizedText = {
   en?: string;
@@ -41,6 +42,7 @@ export type ExerciseRecord = {
   instruction_steps?: LocalizedSteps;
 
   muscle_group?: string;
+  muscleGroups?: string[];
   secondary_muscles?: string[];
 
   target?: string;
@@ -69,13 +71,14 @@ export function searchExerciseRecords(records: ExerciseRecord[], query: string) 
   if (!normalized) return records;
   return records.filter((exercise) => [
     exercise.name, exercise.category, exercise.body_part, exercise.target,
-    exercise.muscle_group, exercise.equipment, ...(exercise.secondary_muscles ?? []),
+    exercise.muscle_group, ...(exercise.muscleGroups ?? []), exercise.equipment, ...(exercise.secondary_muscles ?? []),
   ].filter(Boolean).join(' ').toLowerCase().includes(normalized));
 }
 
 export const exercises = [
   ...(exercisesJson as ExerciseRecord[]),
   ...hammerStrengthExercises,
+  ...curatedExercises,
 ];
 
 // Build immutable lookup data once instead of allocating strings per keystroke.
@@ -83,7 +86,7 @@ const searchIndex = exercises.map((exercise) => ({
   exercise,
   text: Array.from(new Set([
     exercise.name, exercise.category, exercise.body_part, exercise.target,
-    exercise.muscle_group, exercise.equipment, ...(exercise.secondary_muscles ?? []),
+    exercise.muscle_group, ...(exercise.muscleGroups ?? []), exercise.equipment, ...(exercise.secondary_muscles ?? []),
   ].filter((value): value is string => Boolean(value))
     .map((value) => value.trim().toLowerCase()))).join(' '),
 }));

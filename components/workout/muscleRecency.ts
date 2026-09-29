@@ -1,5 +1,6 @@
-import { exercises } from '../exercise-library/exerciseData';
-import { WorkoutHistoryEntry } from '../../types/workoutHistory';
+import { exercises, type ExerciseRecord, getExerciseById } from '../exercise-library/exerciseData';
+import { getPrimaryMuscleFocuses } from '../exercise-library/exerciseMuscleFilter';
+import type { WorkoutHistoryEntry, WorkoutHistoryExercise } from '../../types/workoutHistory';
 
 export type MuscleRecency = {
   muscle: string;
@@ -9,20 +10,6 @@ export type MuscleRecency = {
 };
 
 const dayMs = 24 * 60 * 60 * 1000;
-
-const muscleFocusOptions = [
-  { label: 'Chest', terms: ['chest', 'pectorals'] },
-  { label: 'Back', terms: ['back', 'lats', 'latissimus', 'rhomboids', 'traps', 'trapezius'] },
-  { label: 'Shoulders', terms: ['shoulders', 'delts', 'deltoids', 'rotator cuff'] },
-  { label: 'Biceps', terms: ['biceps'] },
-  { label: 'Triceps', terms: ['triceps'] },
-  { label: 'Forearms', terms: ['forearms', 'lower arms', 'wrist'] },
-  { label: 'Core', terms: ['abs', 'abdominals', 'core', 'waist', 'obliques'] },
-  { label: 'Glutes', terms: ['glutes', 'hip and glute'] },
-  { label: 'Quadriceps', terms: ['quadriceps', 'quads'] },
-  { label: 'Hamstrings', terms: ['hamstrings'] },
-  { label: 'Calves', terms: ['calves', 'soleus', 'lower legs'] },
-] as const;
 
 const exercisesByName = new Map(
   exercises.map((exercise) => [
@@ -47,14 +34,12 @@ function daysBetweenDates(
   laterDate: Date,
   earlierDate: Date
 ) {
-  return Math.max(
-    0,
-    Math.floor(
-      (startOfLocalDay(laterDate).getTime() -
-        startOfLocalDay(earlierDate).getTime()) /
-        dayMs
-    )
-  );
+  const later = startOfLocalDay(laterDate);
+  const earlier = startOfLocalDay(earlierDate);
+  return Math.max(0, Math.round((
+    Date.UTC(later.getFullYear(), later.getMonth(), later.getDate()) -
+    Date.UTC(earlier.getFullYear(), earlier.getMonth(), earlier.getDate())
+  ) / dayMs));
 }
 
 function formatMuscleRecency(
@@ -86,23 +71,54 @@ export function getExerciseMuscleFocus(
     return null;
   }
 
-  const muscleText = [
-    exercise.target,
-    exercise.muscle_group,
-    exercise.body_part,
-    ...(exercise.secondary_muscles ?? []),
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
+  return getPrimaryMuscleFocuses(exercise)[0] ?? null;
+}
 
-  const match = muscleFocusOptions.find((option) =>
-    option.terms.some((term) =>
-      muscleText.includes(term)
-    )
-  );
+function historyExerciseFocuses(exercise: WorkoutHistoryExercise, customById: Map<string, ExerciseRecord>) {
+  if (exercise.muscleGroups?.length || exercise.muscleGroup) {
+    return getPrimaryMuscleFocuses({
+      id: exercise.exerciseLibraryId ?? exercise.id,
+      name: exercise.name,
+      muscle_group: exercise.muscleGroup,
+      muscleGroups: exercise.muscleGroups,
+      isCustom: true,
+    });
+  }
+  const record = customById.get(exercise.exerciseLibraryId ?? '') ??
+    getExerciseById(exercise.exerciseLibraryId ?? '') ??
+    exercisesByName.get(normalize(exercise.name));
+  return record ? getPrimaryMuscleFocuses(record) : [];
+}
 
-  return match?.label ?? null;
+export function getRecentMuscleWorkouts(
+  history: WorkoutHistoryEntry[],
+  customExercises: ExerciseRecord[] = [],
+  now = new Date()
+): MuscleRecency[] {
+  const customById = new Map(customExercises.map((exercise) => [exercise.id, exercise]));
+  const latest = new Map<string, Date>();
+
+  for (const workout of history) {
+    const date = new Date(workout.date);
+    if (Number.isNaN(date.getTime()) || startOfLocalDay(date) > startOfLocalDay(now)) continue;
+    for (const exercise of workout.exercises) {
+      if (!exercise.sets.some((set) => set.completed)) continue;
+      for (const muscle of historyExerciseFocuses(exercise, customById)) {
+        const previous = latest.get(muscle);
+        if (!previous || date > previous) latest.set(muscle, date);
+      }
+    }
+  }
+
+  return [...latest.entries()]
+    .sort(([leftMuscle, leftDate], [rightMuscle, rightDate]) =>
+      rightDate.getTime() - leftDate.getTime() || leftMuscle.localeCompare(rightMuscle))
+    .map(([muscle, date]) => ({
+      muscle,
+      daysSince: daysBetweenDates(now, date),
+      lastWorkedAt: date.toISOString(),
+      label: formatMuscleRecency(muscle, daysBetweenDates(now, date)),
+    }));
 }
 
 export function getMuscleRecencyForExercise(

@@ -19,11 +19,14 @@ import { loadFoodLogs } from '../../services/food-log-storage';
 import { loadProfile } from '../../services/profile-storage';
 import { loadRunHistory } from '../../services/run-storage';
 import { loadWorkoutHistory } from '../../services/workout-history-storage';
+import { loadCustomExercises } from '../../services/custom-exercise-storage';
 import { loadVitamins } from '../../services/vitamin-storage';
 import { FoodLogEntry } from '../../types/foodLog';
 import { ProfileData } from '../../types/profile';
 import { RunEntry } from '../../types/run';
 import { WorkoutHistoryEntry } from '../../types/workoutHistory';
+import type { ExerciseRecord } from '../exercise-library/exerciseData';
+import { getRecentMuscleWorkouts } from '../workout/muscleRecency';
 import { VitaminEntry } from '../../types/vitamin';
 import { localDateKey } from '../../utils/date';
 import { estimateStepCalories } from '../../utils/step-calories';
@@ -34,6 +37,7 @@ export default function DashboardScreen() {
   const [profile, setProfile] = useState<Partial<ProfileData> | null>(null);
   const [foodLogs, setFoodLogs] = useState<FoodLogEntry[]>([]);
   const [workouts, setWorkouts] = useState<WorkoutHistoryEntry[]>([]);
+  const [customExercises, setCustomExercises] = useState<ExerciseRecord[]>([]);
   const [runs, setRuns] = useState<RunEntry[]>([]);
   const [vitamins, setVitamins] = useState<VitaminEntry[]>([]);
   const [phoneStepsEnabled, setPhoneStepsEnabled] = useState(false);
@@ -62,20 +66,25 @@ export default function DashboardScreen() {
         try {
           const savedProfile = await loadProfile();
           const profileId = savedProfile?.id;
-          const [savedFood, savedWorkouts, savedRuns, savedVitamins, pedometerEnabled] = profileId
+          const [savedFood, savedWorkouts, savedRuns, savedVitamins, pedometerEnabled, savedCustomExercises] = profileId
             ? await Promise.all([
                 loadFoodLogs(profileId),
                 loadWorkoutHistory(profileId),
                 loadRunHistory(profileId),
                 loadVitamins(profileId),
                 loadPhonePedometerEnabled(),
+                loadCustomExercises().catch((error) => {
+                  console.error('Failed to load custom exercises for dashboard:', error);
+                  return [];
+                }),
               ])
-            : [[], [], [], [], false];
+            : [[], [], [], [], false, []];
 
           if (active) {
             setProfile(savedProfile);
             setFoodLogs(savedFood);
             setWorkouts(savedWorkouts);
+            setCustomExercises(savedCustomExercises);
             setRuns(savedRuns);
             setVitamins(savedVitamins);
             setPhoneStepsEnabled(pedometerEnabled);
@@ -94,6 +103,10 @@ export default function DashboardScreen() {
   );
 
   const today = useLocalDate();
+  const recentMuscles = useMemo(
+    () => getRecentMuscleWorkouts(workouts, customExercises, new Date(`${today}T12:00:00`)),
+    [workouts, customExercises, today]
+  );
   const caloriesEaten = useMemo(
     () =>
       Math.round(
@@ -263,6 +276,21 @@ export default function DashboardScreen() {
         workoutDates={workouts.map((workout) => localDateKey(new Date(workout.date)))}
         onAddWorkout={addWorkoutForDate}
       />
+
+      <View style={styles.muscleCard}>
+        <Text style={styles.muscleTitle}>Muscles worked</Text>
+        <Text style={styles.muscleHint}>Last trained in completed workouts</Text>
+        {recentMuscles.length === 0 ? (
+          <Text style={styles.muscleEmpty}>Complete a workout to see your muscle history here.</Text>
+        ) : recentMuscles.map((item) => (
+          <View key={item.muscle} style={styles.muscleRow}>
+            <Text style={styles.muscleName}>{item.muscle === 'Core' ? 'Abs / Core' : item.muscle}</Text>
+            <Text style={styles.muscleAge}>
+              {item.daysSince === 0 ? 'Today' : item.daysSince === 1 ? 'Yesterday' : `${item.daysSince} days ago`}
+            </Text>
+          </View>
+        ))}
+      </View>
 
       {/* CALORIES */}
 
@@ -478,6 +506,14 @@ const styles = StyleSheet.create({
     padding: 22,
     marginBottom: 14,
   },
+
+  muscleCard: { backgroundColor: colors.surface, borderRadius: 20, padding: 18, marginBottom: 14 },
+  muscleTitle: { color: colors.text, fontSize: 19, fontWeight: '900' },
+  muscleHint: { color: colors.muted, fontSize: 12, marginTop: 3, marginBottom: 10 },
+  muscleEmpty: { color: colors.muted, fontSize: 13, marginTop: 4 },
+  muscleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: colors.soft },
+  muscleName: { color: colors.text, fontSize: 14, fontWeight: '800', flexShrink: 1 },
+  muscleAge: { color: colors.muted, fontSize: 13, fontWeight: '700' },
 
   label: {
     fontSize: 13,

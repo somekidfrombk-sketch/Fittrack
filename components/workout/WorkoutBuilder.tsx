@@ -74,6 +74,8 @@ export default function WorkoutBuilder({
         id: createId(),
         name: exercise.name,
         exerciseLibraryId: exercise.id,
+        muscleGroup: exercise.isCustom ? exercise.muscle_group : exercise.target,
+        muscleGroups: exercise.isCustom ? exercise.muscleGroups : undefined,
         trackingMethod: exercise.trackingMethod,
         image: exercise.isCustom ? exercise.image : undefined,
         targetSets: String(

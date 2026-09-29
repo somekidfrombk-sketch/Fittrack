@@ -12,7 +12,9 @@ import { MuscleRecency } from './muscleRecency';
 type Props = {
   plan: WorkoutPlan;
   onStart: () => void;
-  onDelete: () => void;
+  onDelete?: () => void;
+  onSave?: () => void;
+  saved?: boolean;
   getExerciseRecency?: (
     exerciseName: string
   ) => MuscleRecency | null;
@@ -41,6 +43,8 @@ export default function WorkoutPlanCard({
   plan,
   onStart,
   onDelete,
+  onSave,
+  saved = false,
   getExerciseRecency,
 }: Props) {
   return (
@@ -56,11 +60,9 @@ export default function WorkoutPlanCard({
           </Text>
         </View>
 
-        <Pressable onPress={onDelete}>
-          <Text style={styles.deleteText}>
-            Delete
-          </Text>
-        </Pressable>
+        {onDelete ? <Pressable onPress={onDelete}>
+          <Text style={styles.deleteText}>Delete</Text>
+        </Pressable> : null}
       </View>
 
       <Text style={styles.summary}>
@@ -113,6 +115,9 @@ export default function WorkoutPlanCard({
           Start Workout
         </Text>
       </Pressable>
+      {onSave ? <Pressable disabled={saved} onPress={onSave} style={[styles.saveButton, saved && styles.savedButton]}>
+        <Text style={styles.saveButtonText}>{saved ? 'Saved to My Plans' : 'Save to My Plans'}</Text>
+      </Pressable> : null}
     </View>
   );
 }
@@ -215,4 +220,7 @@ const styles = StyleSheet.create({
     color: colors.surface,
     fontWeight: '900',
   },
+  saveButton: { marginTop: 9, paddingVertical: 12, borderRadius: 12, alignItems: 'center', backgroundColor: colors.soft },
+  savedButton: { opacity: 0.6 },
+  saveButtonText: { color: colors.text, fontWeight: '900' },
 });

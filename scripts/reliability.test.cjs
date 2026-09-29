@@ -81,6 +81,10 @@ test('custom exercises and saved workouts survive reloads without overwriting in
   };
   await custom.saveCustomExercises([exercise]);
   assert.deepEqual(await custom.loadCustomExercises(), [exercise]);
+  const labeled = { ...exercise, id: 'custom-2', name: 'My push and row',
+    muscle_group: 'Chest', muscleGroups: ['Chest', 'Back'] };
+  await custom.saveCustomExercises([exercise, labeled]);
+  assert.deepEqual(await custom.loadCustomExercises(), [exercise, labeled]);
   const plan = { id: 'plan-1', name: 'Carry day', days: [], exercises: [] };
   await plans.saveWorkoutPlans('profile-a', [plan]);
   assert.deepEqual(await plans.loadWorkoutPlans('profile-a'), [plan]);
@@ -160,6 +164,35 @@ test('active workout survives a fresh app instance with entered sets and timer d
   const service = reopened.load('services/workout-session-storage.ts');
   assert.deepEqual(await service.loadWorkoutSession('a'), session);
   assert.equal(await service.loadWorkoutSession('b'), null);
+});
+
+test('exercise comments survive workout restore without changing older sessions', async () => {
+  const h = harness();
+  const service = h.load('services/workout-session-storage.ts');
+  const older = activeWorkout();
+  await service.saveWorkoutSession('a', older);
+  assert.deepEqual(await service.loadWorkoutSession('a'), older);
+  const commented = activeWorkout();
+  commented.exercises[0].comment = 'Keep elbows close next time';
+  await service.saveWorkoutSession('a', commented);
+  assert.deepEqual(await service.loadWorkoutSession('a'), commented);
+});
+
+test('paused workout and rest timer survive reload while older sessions remain valid', async () => {
+  const h = harness();
+  const service = h.load('services/workout-session-storage.ts');
+  const oldSession = activeWorkout();
+  await service.saveWorkoutSession('a', oldSession);
+  assert.deepEqual(await service.loadWorkoutSession('a'), oldSession);
+  const pausedSession = {
+    ...oldSession,
+    restEndsAt: null,
+    pausedAt: oldSession.startedAt + 120000,
+    pausedDurationMs: 30000,
+    pausedRestSeconds: 45,
+  };
+  await service.saveWorkoutSession('a', pausedSession);
+  assert.deepEqual(await service.loadWorkoutSession('a'), pausedSession);
 });
 
 test('navigation waits for pending session edits and finishing cannot be undone by an older write', async () => {

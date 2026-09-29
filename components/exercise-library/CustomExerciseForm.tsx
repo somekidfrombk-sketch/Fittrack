@@ -3,6 +3,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Alert, Image, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { colors } from '../../constants/theme';
 import type { ExerciseRecord, ExerciseTrackingMethod } from './exerciseData';
+import { muscleFocusOptions } from './exerciseMuscleFilter';
 
 type Props = {
   initial?: ExerciseRecord | null;
@@ -20,16 +21,34 @@ const trackingOptions: { value: ExerciseTrackingMethod; label: string }[] = [
   { value: 'none', label: 'Custom / no measurement' },
 ];
 
+const muscleChoices: string[] = [...muscleFocusOptions.map((option) => option.label), 'Other'];
+
 export default function CustomExerciseForm({ initial, onSave, onCancel }: Props) {
+  const initialMuscles = initial?.muscleGroups?.length ? initial.muscleGroups : [initial?.muscle_group ?? 'Other'];
   const [name, setName] = useState(initial?.name ?? '');
-  const [muscle, setMuscle] = useState(initial?.muscle_group ?? '');
-  const [equipment, setEquipment] = useState(initial?.equipment ?? '');
-  const [type, setType] = useState(initial?.category ?? '');
+  const [selectedMuscles, setSelectedMuscles] = useState<string[]>(initialMuscles.filter((muscle) => muscleChoices.includes(muscle)));
+  const [otherMuscle, setOtherMuscle] = useState(initialMuscles.find((muscle) => !muscleChoices.includes(muscle)) ?? '');
+  const [equipment, setEquipment] = useState(initial?.equipment ?? 'None');
+  const [type, setType] = useState(initial?.category ?? 'Strength');
   const [notes, setNotes] = useState(initial?.instructions?.en ?? '');
   const [image, setImage] = useState(initial?.image ?? '');
   const [imageAsset, setImageAsset] = useState<ImagePicker.ImagePickerAsset | null>(null);
   const [trackingMethod, setTrackingMethod] = useState<ExerciseTrackingMethod>(initial?.trackingMethod ?? 'weight_reps');
   const [saving, setSaving] = useState(false);
+
+  const toggleMuscle = (muscle: string) => {
+    if (muscle === 'Other') {
+      setSelectedMuscles(['Other']);
+      setOtherMuscle('');
+      return;
+    }
+    setSelectedMuscles((current) => {
+      const next = current.includes(muscle)
+        ? current.filter((item) => item !== muscle)
+        : [...current.filter((item) => item !== 'Other'), muscle];
+      return next.length || otherMuscle.trim() ? next : ['Other'];
+    });
+  };
 
   const pickImage = async () => {
     try {
@@ -50,15 +69,18 @@ export default function CustomExerciseForm({ initial, onSave, onCancel }: Props)
   };
 
   const submit = async () => {
-    if (!name.trim() || !muscle.trim() || !equipment.trim() || !type.trim() || saving) return;
+    if (!name.trim() || saving) return;
+    const muscleGroups = [...selectedMuscles.filter((muscle) => muscle !== 'Other'), ...(otherMuscle.trim() ? [otherMuscle.trim()] : [])];
+    if (muscleGroups.length === 0) muscleGroups.push('Other');
     setSaving(true);
     try {
       await onSave({
         id: initial?.id ?? `custom-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         name: name.trim(),
-        muscle_group: muscle.trim(),
-        equipment: equipment.trim(),
-        category: type.trim(),
+        muscle_group: muscleGroups[0],
+        muscleGroups,
+        equipment: equipment.trim() || 'None',
+        category: type.trim() || 'Strength',
         instructions: notes.trim() ? { en: notes.trim() } : undefined,
         image: image || undefined,
         trackingMethod,
@@ -73,11 +95,36 @@ export default function CustomExerciseForm({ initial, onSave, onCancel }: Props)
   return (
     <View style={styles.card}>
       <Text style={styles.title}>{initial ? 'Edit Custom Exercise' : 'Create Custom Exercise'}</Text>
-      <Text style={styles.hint}>Add it to the regular exercise library for future workouts.</Text>
+      <Text style={styles.hint}>{initial ? 'Update this exercise in your library.' : 'Save it to your library and add it to this workout.'}</Text>
       <Text style={styles.label}>Exercise name</Text>
       <TextInput value={name} onChangeText={setName} placeholder="Exercise name" placeholderTextColor={colors.lightMuted} style={styles.input} />
-      <Text style={styles.label}>Muscle group</Text>
-      <TextInput value={muscle} onChangeText={setMuscle} placeholder="e.g. Back" placeholderTextColor={colors.lightMuted} style={styles.input} />
+      <Text style={styles.label}>Muscles worked</Text>
+      <Text style={styles.hint}>Tap one or more muscles. These labels appear in filters and your dashboard.</Text>
+      <View style={styles.chips}>
+        {muscleChoices.map((muscle) => (
+          <Pressable
+            key={muscle}
+            accessibilityRole="button"
+            accessibilityState={{ selected: selectedMuscles.includes(muscle) }}
+            style={[styles.chip, selectedMuscles.includes(muscle) && styles.selectedChip]}
+            onPress={() => toggleMuscle(muscle)}
+          >
+            <Text style={[styles.chipText, selectedMuscles.includes(muscle) && styles.selectedChipText]}>{muscle}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <TextInput
+        value={otherMuscle}
+        onChangeText={(value) => {
+          setOtherMuscle(value);
+          setSelectedMuscles((current) => value.trim()
+            ? current.filter((muscle) => muscle !== 'Other')
+            : current.length ? current : ['Other']);
+        }}
+        placeholder="Other muscle (optional)"
+        placeholderTextColor={colors.lightMuted}
+        style={[styles.input, styles.otherMuscleInput]}
+      />
       <Text style={styles.label}>Equipment type</Text>
       <TextInput value={equipment} onChangeText={setEquipment} placeholder="e.g. Dumbbell or None" placeholderTextColor={colors.lightMuted} style={styles.input} />
       <Text style={styles.label}>Exercise type</Text>
@@ -106,8 +153,8 @@ export default function CustomExerciseForm({ initial, onSave, onCancel }: Props)
       </View>
       <View style={styles.actions}>
         <Pressable onPress={onCancel} style={styles.secondaryButton}><Text style={styles.secondaryText}>Cancel</Text></Pressable>
-        <Pressable disabled={!name.trim() || !muscle.trim() || !equipment.trim() || !type.trim() || saving} onPress={() => void submit()} style={[styles.saveButton, (!name.trim() || !muscle.trim() || !equipment.trim() || !type.trim() || saving) && styles.disabled]}>
-          <Text style={styles.saveText}>{saving ? 'Saving…' : 'Save Exercise'}</Text>
+        <Pressable disabled={!name.trim() || saving} onPress={() => void submit()} style={[styles.saveButton, (!name.trim() || saving) && styles.disabled]}>
+          <Text style={styles.saveText}>{saving ? 'Saving…' : initial ? 'Save Changes' : 'Save & Add Exercise'}</Text>
         </Pressable>
       </View>
     </View>
@@ -120,6 +167,7 @@ const styles = StyleSheet.create({
   hint: { color: colors.muted, fontSize: 12, marginTop: 4, marginBottom: 12 },
   label: { color: colors.text, fontSize: 13, fontWeight: '900', marginTop: 14, marginBottom: 7 },
   input: { backgroundColor: colors.soft2, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: colors.text },
+  otherMuscleInput: { marginTop: 8 },
   notes: { minHeight: 92, textAlignVertical: 'top' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 9, backgroundColor: colors.soft2 },

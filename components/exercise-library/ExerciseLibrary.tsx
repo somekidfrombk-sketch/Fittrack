@@ -18,6 +18,7 @@ import { getExerciseImage } from './exerciseMedia';
 import { loadCustomExercises, saveCustomExercises } from '../../services/custom-exercise-storage';
 import { persistCustomExerciseImage } from '../../services/custom-exercise-image';
 import CustomExerciseForm from './CustomExerciseForm';
+import { exerciseMatchesMuscle, muscleFocusOptions } from './exerciseMuscleFilter';
 
 import {
   ExerciseRecord,
@@ -38,48 +39,14 @@ type Props = {
   ) => void;
 };
 
-const muscleFocusOptions = [
-  { label: 'Chest', terms: ['chest', 'pectorals'] },
-  { label: 'Back', terms: ['back', 'lats', 'latissimus', 'rhomboids', 'traps', 'trapezius'] },
-  { label: 'Shoulders', terms: ['shoulders', 'delts', 'deltoids', 'rotator cuff'] },
-  { label: 'Biceps', terms: ['biceps'] },
-  { label: 'Triceps', terms: ['triceps'] },
-  { label: 'Forearms', terms: ['forearms', 'lower arms', 'wrist'] },
-  { label: 'Core', terms: ['abs', 'abdominals', 'core', 'waist', 'obliques'] },
-  { label: 'Glutes', terms: ['glutes', 'hip and glute'] },
-  { label: 'Quadriceps', terms: ['quadriceps', 'quads'] },
-  { label: 'Hamstrings', terms: ['hamstrings'] },
-  { label: 'Calves', terms: ['calves', 'soleus', 'lower legs'] },
-] as const;
-
 type MuscleLabel = MuscleFocusLabel;
-
-function exerciseMatchesMuscle(
-  exercise: ExerciseRecord,
-  muscleLabel: string
-) {
-  const option = muscleFocusOptions.find(
-    (item) => item.label === muscleLabel
-  );
-  if (!option) return true;
-
-  const muscleText = [
-    exercise.target,
-    exercise.muscle_group,
-    exercise.body_part,
-    ...(exercise.secondary_muscles ?? []),
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
-
-  return option.terms.some((term) => muscleText.includes(term));
-}
 
 function uniqueExerciseSummary(exercise: ExerciseRecord) {
   return Array.from(
     new Map(
-      [exercise.target, exercise.body_part, exercise.category, exercise.equipment]
+      [exercise.target, exercise.body_part,
+        exercise.isCustom ? exercise.muscleGroups?.join(', ') || exercise.muscle_group : undefined,
+        exercise.category, exercise.equipment]
         .filter((value): value is string => Boolean(value))
         .map((value) => [value.trim().toLowerCase(), value])
     ).values()
@@ -130,6 +97,7 @@ export default function ExerciseLibrary({
 
   const saveCustomExercise = async (exercise: ExerciseRecord, imageAsset: import('expo-image-picker').ImagePickerAsset | null) => {
     try {
+      const isNew = !customExercises.some((item) => item.id === exercise.id);
       const saved = imageAsset
         ? { ...exercise, image: await persistCustomExerciseImage(imageAsset, exercise.id) }
         : exercise;
@@ -142,6 +110,9 @@ export default function ExerciseLibrary({
       setFormOpen(false);
       setEditingExercise(null);
       setCustomLoadError(false);
+      if (isNew) {
+        onSelectExercise({ exercise: saved, sets: 3, reps: 10, restSeconds: 60 });
+      }
     } catch (error) {
       console.error('Failed to save custom exercise:', error);
       Alert.alert('Exercise not saved', 'Please try again.');
@@ -196,7 +167,7 @@ export default function ExerciseLibrary({
     if (selectedMuscles.length > 0) {
       results = results.filter((exercise) =>
         selectedMuscles.some((muscle) =>
-          exerciseMatchesMuscle(exercise, muscle)
+          exerciseMatchesMuscle(exercise, muscle as MuscleLabel)
         )
       );
     }

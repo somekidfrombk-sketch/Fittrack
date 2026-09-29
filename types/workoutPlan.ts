@@ -11,6 +11,8 @@ export type PlannedExercise = {
   id: string;
   name: string;
   exerciseLibraryId?: string;
+  muscleGroup?: string;
+  muscleGroups?: string[];
   trackingMethod?: import('../components/exercise-library/exerciseData').ExerciseTrackingMethod;
   image?: string;
 
@@ -24,6 +26,7 @@ export type WorkoutPlan = {
   id: string;
 
   name: string;
+  starterId?: string;
 
   days: Weekday[];
 

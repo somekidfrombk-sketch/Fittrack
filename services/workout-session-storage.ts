@@ -11,6 +11,9 @@ export type WorkoutSession = {
   exerciseRestTimes: Record<string, number>;
   prSetIds: string[];
   restEndsAt: number | null;
+  pausedAt?: number | null;
+  pausedDurationMs?: number;
+  pausedRestSeconds?: number | null;
 };
 
 function key(profileId: string) {
@@ -36,12 +39,16 @@ export function loadWorkoutSession(profileId: string): Promise<WorkoutSession | 
       !['light', 'moderate', 'vigorous'].includes(value.workoutIntensity) ||
       !Array.isArray(value.exercises) || !value.exercises.every(exercise =>
         exercise && typeof exercise.id === 'string' && typeof exercise.name === 'string' &&
+        (exercise.comment === undefined || typeof exercise.comment === 'string') &&
         Array.isArray(exercise.sets) && exercise.sets.every(set => set &&
           typeof set.id === 'string' && typeof set.weight === 'string' &&
           typeof set.reps === 'string' && typeof set.completed === 'boolean')) ||
       !value.exerciseRestTimes || typeof value.exerciseRestTimes !== 'object' ||
       !Object.values(value.exerciseRestTimes).every(time => Number.isFinite(time) && time >= 0) ||
       !Array.isArray(value.prSetIds) || !value.prSetIds.every(id => typeof id === 'string') ||
+      !(value.pausedAt === undefined || value.pausedAt === null || Number.isFinite(value.pausedAt) && value.pausedAt >= value.startedAt) ||
+      !(value.pausedDurationMs === undefined || Number.isFinite(value.pausedDurationMs) && value.pausedDurationMs >= 0) ||
+      !(value.pausedRestSeconds === undefined || value.pausedRestSeconds === null || Number.isFinite(value.pausedRestSeconds) && value.pausedRestSeconds >= 0) ||
       !(value.restEndsAt === null || Number.isFinite(value.restEndsAt))) {
       throw new Error('Saved workout session is invalid; original data preserved.');
     }

@@ -129,3 +129,23 @@ test('muscle recency uses the latest completed workout for the same muscle group
   assert.equal(recency.label, '3 days since Chest');
   assert.equal(recency.lastWorkedAt, '2026-09-15T12:00:00.000Z');
 });
+
+test('dashboard lists last trained primary muscles, including custom exercises and backdated workouts', () => {
+  const { getRecentMuscleWorkouts } = loadModule('components/workout/muscleRecency.ts');
+  const now = new Date('2026-09-18T12:00:00.000Z');
+  const entry = (date, exercises) => ({ id: date, profileId: 'profile', date,
+    durationSeconds: 1800, totalVolume: 0, completedSets: 1, exercises });
+  const set = (completed = true) => [{ id: 'set', weight: '', reps: '10', completed }];
+  const history = [
+    entry('2026-09-15T12:00:00.000Z', [{ id: 'chest', name: 'archer push up', sets: set() }]),
+    entry('2026-09-16T12:00:00.000Z', [{ id: 'abs', name: 'arm slingers hanging bent knee legs', sets: set() }]),
+    entry('2026-09-17T12:00:00.000Z', [{ id: 'skipped', name: 'barbell bench press', sets: set(false) }]),
+    entry('2026-09-14T12:00:00.000Z', [{ id: 'custom', name: 'My calf raise', exerciseLibraryId: 'custom-deleted', muscleGroup: 'Calves', sets: set() }]),
+    entry('2026-09-13T12:00:00.000Z', [{ id: 'custom-multi', name: 'My combo', exerciseLibraryId: 'custom-multi-deleted', muscleGroup: 'Back', muscleGroups: ['Back', 'Biceps'], sets: set() }]),
+  ];
+  const recent = getRecentMuscleWorkouts(history, [], now);
+  assert.deepEqual(recent.map(({ muscle, daysSince }) => [muscle, daysSince]), [
+    ['Core', 2], ['Chest', 3], ['Calves', 4], ['Back', 5], ['Biceps', 5],
+  ]);
+  assert.equal(recent.some(({ muscle }) => muscle === 'Shoulders'), false);
+});
