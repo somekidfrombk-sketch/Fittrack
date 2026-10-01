@@ -1,5 +1,5 @@
 import { loadWorkoutSession, saveWorkoutSession } from '../../services/workout-session-storage';
-import { loadWorkoutPlans, saveWorkoutPlans } from '../../services/workout-plan-storage';
+import { loadWorkoutPlans, updateWorkoutPlans } from '../../services/workout-plan-storage';
 import WorkoutPhotos from '../progress/WorkoutPhotos';
 import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -29,7 +29,7 @@ import {
 } from '../../services/profile-storage';
 import {
   loadWorkoutHistory as loadStoredWorkoutHistory,
-  saveWorkoutHistory as persistWorkoutHistory,
+  updateWorkoutHistory,
 } from '../../services/workout-history-storage';
 import { WorkoutExercise } from '../../types/workout';
 import { createUserContextSnapshot } from '../../services/user-context-snapshot';
@@ -79,6 +79,7 @@ export default function WorkoutScreen() {
   const { date: requestedDate, requestId } = useLocalSearchParams<{ date?: string; requestId?: string }>();
   const handledRequest = useRef<string | null>(null);
   const savingWorkout = useRef(false);
+  const menuScrollRef = useRef<ScrollView>(null);
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const [sessionLoadError, setSessionLoadError] = useState(false);
   const [sessionSaveError, setSessionSaveError] = useState(false);
@@ -107,10 +108,13 @@ export default function WorkoutScreen() {
 
   const [plans, setPlans] =
     useState<WorkoutPlan[]>([]);
+  const [workoutMenuTab, setWorkoutMenuTab] = useState<'workout' | 'plans' | 'history'>('workout');
   const [workoutDate, setWorkoutDate] = useState<string | null>(null);
   const [savePlanOpen, setSavePlanOpen] = useState(false);
   const [savePlanName, setSavePlanName] = useState('');
   const [savingPlan, setSavingPlan] = useState(false);
+  const [discardingWorkout, setDiscardingWorkout] = useState(false);
+  const [finishingWorkout, setFinishingWorkout] = useState(false);
   const [historyTemplateEntry, setHistoryTemplateEntry] = useState<WorkoutHistoryEntry | null>(null);
   const [historyTemplateName, setHistoryTemplateName] = useState('');
   const [savingHistoryTemplate, setSavingHistoryTemplate] = useState(false);
@@ -194,7 +198,7 @@ export default function WorkoutScreen() {
   };
 
   useLayoutEffect(() => {
-    if (!sessionLoaded || !profileId) return;
+    if (!sessionLoaded || !profileId || savingWorkout.current) return;
     void saveWorkoutSession(profileId, startedAt === null ? null : {
       startedAt, exercises, workoutIntensity, exerciseRestTimes, prSetIds, restEndsAt, workoutDate,
       pausedAt, pausedDurationMs, pausedRestSeconds,
@@ -289,50 +293,27 @@ export default function WorkoutScreen() {
     }
   }, [sessionLoaded, requestId, requestedDate, startedAt, resetTimer]);
 
-  const updatePlans = async (next: WorkoutPlan[]) => {
-    if (!profileId) return;
+  const updatePlans = async (update: (plans: WorkoutPlan[]) => WorkoutPlan[]) => {
+    if (!profileId) return false;
     if (plansLoadError) {
       Alert.alert('Saved workouts unavailable', 'Reopen the Workout screen and try again.');
-      return;
+      return false;
     }
     try {
-      await saveWorkoutPlans(profileId, next);
+      const next = await updateWorkoutPlans(profileId, update);
       setPlans(next);
+      return true;
     } catch (error) {
       console.error('Failed to save workout plans:', error);
-      Alert.alert('Workout not saved', 'Please try again.');
+      if (Platform.OS === 'web') window.alert('Workout plan not saved. Please try again.');
+      else Alert.alert('Workout not saved', 'Please try again.');
+      return false;
     }
   };
 
-  /*
-   * SAVE WORKOUT HISTORY
-   */
-
   useEffect(() => {
-    if (!historyLoaded || !profileId) {
-      return;
-    }
-
-    const saveWorkoutHistory = async () => {
-      try {
-        await persistWorkoutHistory(
-          profileId,
-          history
-        );
-      } catch (error) {
-        console.error(
-          'Failed to save workout history:',
-          error
-        );
-      }
-    };
-
-    saveWorkoutHistory();
-  }, [
-    history,
-    historyLoaded,
-    profileId,
-  ]);
+    menuScrollRef.current?.scrollTo({ y: 0, animated: false });
+  }, [workoutMenuTab]);
 
   /*
    * WORKOUT DURATION
@@ -652,8 +633,7 @@ export default function WorkoutScreen() {
     };
     setSavingPlan(true);
     try {
-      await saveWorkoutPlans(profileId, [...plans, plan]);
-      setPlans((current) => [...current, plan]);
+      setPlans(await updateWorkoutPlans(profileId, (current) => [...current, plan]));
       setSavePlanName('');
       setSavePlanOpen(false);
       Alert.alert('Workout saved', 'Find it in Your Workout Plans.');
@@ -849,8 +829,7 @@ export default function WorkoutScreen() {
     }
     setSavingHistoryTemplate(true);
     try {
-      await saveWorkoutPlans(profileId, [...plans, plan]);
-      setPlans((current) => [...current, plan]);
+      setPlans(await updateWorkoutPlans(profileId, (current) => [...current, plan]));
       setHistoryTemplateEntry(null);
       setHistoryTemplateName('');
       Alert.alert('Template saved', 'Find it in Your Workout Plans.');
@@ -1064,19 +1043,23 @@ export default function WorkoutScreen() {
       };
 
     savingWorkout.current = true;
+    setFinishingWorkout(true);
     try {
       const completedEntry = { ...entry, userContext: await createUserContextSnapshot(profileId) };
-      const updated = [completedEntry, ...history];
-      await persistWorkoutHistory(profileId, updated);
+      const updated = await updateWorkoutHistory(profileId, (current) => [
+        completedEntry, ...current.filter((item) => item.id !== completedEntry.id),
+      ]);
       await saveWorkoutSession(profileId, null);
       setHistory(updated);
       setCompletedWorkout(completedEntry);
       resetWorkoutState();
     } catch (error) {
       console.error('Failed to finish workout:', error);
-      Alert.alert('Workout not saved', 'Your workout is still open. Please try Finish again.');
+      if (Platform.OS === 'web') window.alert('Your workout is still open. Please try Finish again.');
+      else Alert.alert('Workout not saved', 'Your workout is still open. Please try Finish again.');
     } finally {
       savingWorkout.current = false;
+      setFinishingWorkout(false);
     }
   };
 
@@ -1406,7 +1389,8 @@ export default function WorkoutScreen() {
   const confirmDestructiveAction = (
     title: string,
     message: string,
-    onConfirm: () => void
+    onConfirm: () => void,
+    confirmLabel = 'Delete'
   ) => {
     if (Platform.OS === 'web') {
       if (window.confirm(`${title}\n\n${message}`)) {
@@ -1421,11 +1405,38 @@ export default function WorkoutScreen() {
         style: 'cancel',
       },
       {
-        text: 'Delete',
+        text: confirmLabel,
         style: 'destructive',
         onPress: onConfirm,
       },
     ]);
+  };
+
+  const discardWorkout = () => {
+    if (discardingWorkout || savingWorkout.current || !profileId) return;
+    confirmDestructiveAction(
+      'Discard workout?',
+      'This unfinished workout will be removed. Completed workout history and saved plans will stay.',
+      () => {
+        void (async () => {
+          if (savingWorkout.current) return;
+          savingWorkout.current = true;
+          setDiscardingWorkout(true);
+          try {
+            await saveWorkoutSession(profileId, null);
+            resetWorkoutState();
+          } catch (error) {
+            console.error('Failed to discard workout:', error);
+            if (Platform.OS === 'web') window.alert('Could not discard the workout. Please try again.');
+            else Alert.alert('Could not discard workout', 'Please try again.');
+          } finally {
+            savingWorkout.current = false;
+            setDiscardingWorkout(false);
+          }
+        })();
+      },
+      'Discard'
+    );
   };
 
   const moveItem = <T,>(
@@ -1608,37 +1619,21 @@ export default function WorkoutScreen() {
   const deleteHistoryEntry = (
     entryId: string
   ) => {
-    Alert.alert(
-      'Delete Workout',
-      'Are you sure you want to delete this workout from your history?',
-      [
-        {
-          text:
-            'Cancel',
-
-          style:
-            'cancel',
-        },
-
-        {
-          text:
-            'Delete',
-
-          style:
-            'destructive',
-
-          onPress: () => {
-            setHistory(
-              (current) =>
-                current.filter(
-                  (entry) =>
-                    entry.id !==
-                    entryId
-                )
-            );
-          },
-        },
-      ]
+    confirmDestructiveAction(
+      'Delete workout?',
+      'This completed workout will be removed from your history. Saved plans will stay.',
+      () => {
+        void (async () => {
+          try {
+            const updated = await updateWorkoutHistory(profileId, (current) => current.filter((entry) => entry.id !== entryId));
+            setHistory(updated);
+          } catch (error) {
+            console.error('Failed to delete workout:', error);
+            if (Platform.OS === 'web') window.alert('Could not delete the workout. Please try again.');
+            else Alert.alert('Could not delete workout', 'Please try again.');
+          }
+        })();
+      }
     );
   };
 
@@ -1707,6 +1702,7 @@ export default function WorkoutScreen() {
           onPress={Keyboard.dismiss}
         >
       <ScrollView
+        ref={menuScrollRef}
         contentContainerStyle={
           styles.plannerContainer
         }
@@ -1754,6 +1750,34 @@ export default function WorkoutScreen() {
           </Text>
         </View>
 
+        <View style={styles.workoutTabs}>
+          <Pressable
+            onPress={() => setWorkoutMenuTab('workout')}
+            style={[styles.workoutTab, workoutMenuTab === 'workout' && styles.workoutTabActive]}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: workoutMenuTab === 'workout' }}
+          >
+            <Text style={[styles.workoutTabText, workoutMenuTab === 'workout' && styles.workoutTabTextActive]}>Workout</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setWorkoutMenuTab('plans')}
+            style={[styles.workoutTab, workoutMenuTab === 'plans' && styles.workoutTabActive]}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: workoutMenuTab === 'plans' }}
+          >
+            <Text style={[styles.workoutTabText, workoutMenuTab === 'plans' && styles.workoutTabTextActive]}>My Plans</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setWorkoutMenuTab('history')}
+            style={[styles.workoutTab, workoutMenuTab === 'history' && styles.workoutTabActive]}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: workoutMenuTab === 'history' }}
+          >
+            <Text style={[styles.workoutTabText, workoutMenuTab === 'history' && styles.workoutTabTextActive]}>History</Text>
+          </Pressable>
+        </View>
+
+        <View style={workoutMenuTab !== 'workout' && styles.hiddenPanel}>
         <Pressable
           style={
             styles.quickStartButton
@@ -1820,6 +1844,24 @@ export default function WorkoutScreen() {
         )}
 
         {plansLoadError ? <Text style={styles.subtitle}>Saved workouts could not be loaded. Your other workout data is available.</Text> : null}
+        <View style={styles.planPreview}>
+          <Text style={styles.planPreviewTitle}>Your Workout Plans</Text>
+          {plans.length === 0 ? (
+            <Text style={styles.planPreviewEmpty}>No saved plans yet.</Text>
+          ) : plans.slice(0, 3).map((plan) => (
+            <Pressable key={plan.id} style={styles.planPreviewRow} onPress={() => setWorkoutMenuTab('plans')} accessibilityRole="button" accessibilityLabel={`View ${plan.name} in My Plans`}>
+              <Text style={styles.planPreviewName} numberOfLines={1}>{plan.name}</Text>
+              <Text style={styles.planPreviewArrow}>›</Text>
+            </Pressable>
+          ))}
+          <Pressable onPress={() => setWorkoutMenuTab('plans')} style={styles.planPreviewLink} accessibilityRole="button">
+            <Text style={styles.planPreviewLinkText}>{plans.length ? `View all ${plans.length} plans` : 'Create a plan'} ›</Text>
+          </Pressable>
+        </View>
+
+        </View>
+        <View style={workoutMenuTab !== 'plans' && styles.hiddenPanel}>
+        {plansLoadError ? <Text accessibilityRole="alert" style={styles.subtitle}>Saved plans could not be loaded. Reopen the Workout screen to retry.</Text> : null}
         <WorkoutPlanner
           plans={
             plans
@@ -1834,17 +1876,15 @@ export default function WorkoutScreen() {
             getExerciseRecency
           }
         />
-
+        </View>
+        <View style={workoutMenuTab !== 'history' && styles.hiddenPanel}>
         <WorkoutHistory
-          history={
-            history
-          }
-          onDeleteEntry={
-            deleteHistoryEntry
-          }
+          history={history}
+          onDeleteEntry={deleteHistoryEntry}
           onUseAsTemplate={startWorkoutFromHistory}
           onSaveAsTemplate={(entry) => { setHistoryTemplateName(''); setHistoryTemplateEntry(entry); }}
         />
+        </View>
       </ScrollView>
         </TouchableWithoutFeedback>
       </KeyboardAvoidingView>
@@ -1870,6 +1910,7 @@ export default function WorkoutScreen() {
 
   return (
     <KeyboardAvoidingView
+      pointerEvents={finishingWorkout || discardingWorkout ? 'none' : 'auto'}
       style={
         styles.screen
       }
@@ -2028,8 +2069,11 @@ export default function WorkoutScreen() {
             >
               <Text style={styles.saveCurrentButtonText}>Save</Text>
             </Pressable>
-            <Pressable style={styles.finishButton} onPress={finishWorkout}>
-              <Text style={styles.finishButtonText}>Finish</Text>
+            <Pressable disabled={finishingWorkout || discardingWorkout} style={styles.finishButton} onPress={finishWorkout}>
+              <Text style={styles.finishButtonText}>{finishingWorkout ? 'Saving…' : 'Finish'}</Text>
+            </Pressable>
+            <Pressable accessibilityRole="button" disabled={discardingWorkout || finishingWorkout} style={[styles.saveCurrentButton, discardingWorkout && styles.savePlanDisabled]} onPress={discardWorkout}>
+              <Text style={styles.saveCurrentButtonText}>{discardingWorkout ? 'Discarding…' : 'Discard'}</Text>
             </Pressable>
           </View>
         </View>
@@ -2429,6 +2473,20 @@ const styles =
     header: {
       marginBottom: 18,
     },
+    hiddenPanel: { display: 'none' },
+    workoutTabs: { flexDirection: 'row', padding: 4, borderRadius: 14, backgroundColor: colors.soft2, marginBottom: 20 },
+    workoutTab: { flex: 1, paddingVertical: 11, borderRadius: 11, alignItems: 'center' },
+    workoutTabActive: { backgroundColor: colors.surface },
+    workoutTabText: { color: colors.muted, fontWeight: '900' },
+    workoutTabTextActive: { color: colors.text },
+    planPreview: { backgroundColor: colors.surface, borderRadius: 20, padding: 18, marginBottom: 22 },
+    planPreviewTitle: { fontSize: 20, fontWeight: '900', color: colors.text, marginBottom: 8 },
+    planPreviewEmpty: { color: colors.muted, marginVertical: 8 },
+    planPreviewRow: { flexDirection: 'row', alignItems: 'center', borderTopWidth: 1, borderTopColor: colors.soft2, paddingVertical: 12 },
+    planPreviewName: { flex: 1, color: colors.text, fontWeight: '800' },
+    planPreviewArrow: { color: colors.muted, fontSize: 22 },
+    planPreviewLink: { paddingTop: 12, alignSelf: 'flex-start' },
+    planPreviewLinkText: { color: colors.text, fontWeight: '900' },
 
     brand: {
       fontSize: 12,
@@ -2508,7 +2566,7 @@ const styles =
       gap: 12,
     },
 
-    activeHeaderActions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center', gap: 8 },
+    activeHeaderActions: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center', gap: 8 },
     saveCurrentButton: { backgroundColor: colors.surface, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11 },
     saveCurrentButtonText: { color: colors.text, fontWeight: '900' },
     savePlanOverlay: { flex: 1, backgroundColor: 'rgba(17,24,39,0.5)', alignItems: 'center', justifyContent: 'center', padding: 24 },

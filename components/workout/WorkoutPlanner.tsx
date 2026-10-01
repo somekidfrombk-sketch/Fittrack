@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
+  Alert,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -13,12 +15,10 @@ import { MuscleRecency } from './muscleRecency';
 import TodayWorkoutCard from './TodayWorkoutCard';
 import WorkoutBuilder from './WorkoutBuilder';
 import WorkoutPlanCard from './WorkoutPlanCard';
-import { starterWorkoutPlans } from './starterWorkoutPlans';
-import { createId } from './workoutUtils';
 
 type Props = {
   plans: WorkoutPlan[];
-  onPlansChange: (plans: WorkoutPlan[]) => void;
+  onPlansChange: (update: (plans: WorkoutPlan[]) => WorkoutPlan[]) => Promise<boolean>;
   onStartPlan: (plan: WorkoutPlan) => void;
   getExerciseRecency?: (
     exerciseName: string
@@ -43,6 +43,7 @@ export default function WorkoutPlanner({
 }: Props) {
   const [buildingWorkout, setBuildingWorkout] =
     useState(false);
+  const [editingPlan, setEditingPlan] = useState<WorkoutPlan | null>(null);
 
   const today =
     weekdays[new Date().getDay()];
@@ -55,44 +56,48 @@ export default function WorkoutPlanner({
     [plans, today]
   );
 
-  const saveNewPlan = (
+  const saveNewPlan = async (
     plan: WorkoutPlan
   ) => {
-    onPlansChange([
-      ...plans,
-      plan,
-    ]);
+    const saved = await onPlansChange((current) => editingPlan
+      ? current.map((existing) => existing.id === editingPlan.id ? plan : existing)
+      : [...current, plan]);
 
-    setBuildingWorkout(false);
+    if (saved) {
+      setBuildingWorkout(false);
+      setEditingPlan(null);
+    }
+    return saved;
   };
 
   const deletePlan = (
     planId: string
   ) => {
-    onPlansChange(
-      plans.filter(
-        (plan) => plan.id !== planId
-      )
-    );
-  };
-
-  const saveStarterPlan = (starter: WorkoutPlan) => {
-    if (plans.some((plan) => plan.starterId === starter.id)) return;
-    onPlansChange([...plans, {
-      ...starter,
-      id: createId(),
-      starterId: starter.id,
-      exercises: starter.exercises.map((exercise) => ({ ...exercise, id: createId() })),
-    }]);
+    const plan = plans.find((item) => item.id === planId);
+    if (!plan) return;
+    const remove = () => {
+      void onPlansChange((current) => current.filter((item) => item.id !== planId));
+    };
+    if (Platform.OS === 'web') {
+      if (window.confirm(`Delete ${plan.name}?\n\nThis removes the saved plan, but keeps your workout history.`)) remove();
+      return;
+    }
+    Alert.alert('Delete workout plan?', `Delete ${plan.name}? Your workout history will be kept.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: remove },
+    ]);
   };
 
   if (buildingWorkout) {
     return (
       <WorkoutBuilder
+        key={editingPlan?.id ?? 'new'}
+        initialPlan={editingPlan ?? undefined}
         onSave={saveNewPlan}
-        onCancel={() =>
-          setBuildingWorkout(false)
-        }
+        onCancel={() => {
+          setBuildingWorkout(false);
+          setEditingPlan(null);
+        }}
       />
     );
   }
@@ -147,6 +152,10 @@ export default function WorkoutPlanner({
             onDelete={() =>
               deletePlan(plan.id)
             }
+            onEdit={() => {
+              setEditingPlan(plan);
+              setBuildingWorkout(true);
+            }}
             getExerciseRecency={
               getExerciseRecency
             }
@@ -188,20 +197,6 @@ export default function WorkoutPlanner({
         </Text>
       </Pressable>
 
-      <View style={styles.starterHeader}>
-        <Text style={styles.sectionTitle}>Try a Workout</Text>
-        <Text style={styles.sectionSubtitle}>Start now or save one to Your Workout Plans.</Text>
-      </View>
-      {starterWorkoutPlans.map((starter) => (
-        <WorkoutPlanCard
-          key={starter.id}
-          plan={starter}
-          onStart={() => onStartPlan(starter)}
-          onSave={() => saveStarterPlan(starter)}
-          saved={plans.some((plan) => plan.starterId === starter.id)}
-          getExerciseRecency={getExerciseRecency}
-        />
-      ))}
     </View>
   );
 }
@@ -210,7 +205,6 @@ const styles = StyleSheet.create({
   sectionHeader: {
     marginBottom: 12,
   },
-  starterHeader: { marginTop: 26, marginBottom: 12 },
 
   sectionTitle: {
     fontSize: 22,

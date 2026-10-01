@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import {
+    Alert,
+    Platform,
     Pressable,
     StyleSheet,
     Text,
@@ -33,20 +35,41 @@ type ExerciseSelection = {
 };
 
 type Props = {
-  onSave: (plan: WorkoutPlan) => void;
+  initialPlan?: WorkoutPlan;
+  onSave: (plan: WorkoutPlan) => Promise<boolean>;
   onCancel: () => void;
 };
 
 export default function WorkoutBuilder({
+  initialPlan,
   onSave,
   onCancel,
 }: Props) {
-  const [planName, setPlanName] = useState('');
+  const [planName, setPlanName] = useState(initialPlan?.name ?? '');
   const [selectedDays, setSelectedDays] =
-    useState<Weekday[]>([]);
+    useState<Weekday[]>(initialPlan?.days ?? []);
 
   const [draftExercises, setDraftExercises] =
-    useState<WorkoutPlan['exercises']>([]);
+    useState<WorkoutPlan['exercises']>(() => initialPlan?.exercises.map((exercise) => ({ ...exercise })) ?? []);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [libraryOpen, setLibraryOpen] = useState(false);
+
+  const cancelEditing = () => {
+    if (isSaving) return;
+    const changed = planName !== (initialPlan?.name ?? '') ||
+      JSON.stringify(selectedDays) !== JSON.stringify(initialPlan?.days ?? []) ||
+      JSON.stringify(draftExercises) !== JSON.stringify(initialPlan?.exercises ?? []);
+    if (!changed) { onCancel(); return; }
+    if (Platform.OS === 'web') {
+      if (window.confirm('Discard unsaved plan changes?')) onCancel();
+      return;
+    }
+    Alert.alert('Discard unsaved changes?', 'Your saved plan will stay as it was.', [
+      { text: 'Keep editing', style: 'cancel' },
+      { text: 'Discard', style: 'destructive', onPress: onCancel },
+    ]);
+  };
 
   const toggleDay = (day: Weekday) => {
     setSelectedDays((current) =>
@@ -96,6 +119,7 @@ export default function WorkoutBuilder({
         ),
       },
     ]);
+    setLibraryOpen(false);
   };
 
   const removeExercise = (
@@ -109,23 +133,52 @@ export default function WorkoutBuilder({
     );
   };
 
-  const saveWorkout = () => {
+  const updateExercise = (
+    exerciseId: string,
+    updates: Partial<WorkoutPlan['exercises'][number]>
+  ) => {
+    setDraftExercises((current) => current.map((exercise) =>
+      exercise.id === exerciseId ? { ...exercise, ...updates } : exercise
+    ));
+  };
+
+  const moveExercise = (index: number, direction: -1 | 1) => {
+    setDraftExercises((current) => {
+      const nextIndex = index + direction;
+      if (nextIndex < 0 || nextIndex >= current.length) return current;
+      const next = [...current];
+      [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+      return next;
+    });
+  };
+
+  const saveWorkout = async () => {
     const name = planName.trim();
 
     if (
       !name ||
-      selectedDays.length === 0 ||
       draftExercises.length === 0
     ) {
       return;
     }
 
-    onSave({
-      id: createId(),
-      name,
-      days: selectedDays,
-      exercises: draftExercises,
-    });
+    if (isSaving) return;
+    setIsSaving(true);
+    setSaveError('');
+    try {
+      const saved = await onSave({
+        ...initialPlan,
+        id: initialPlan?.id ?? createId(),
+        name,
+        days: selectedDays,
+        exercises: draftExercises,
+      });
+      if (!saved) setSaveError('Your plan could not be saved. Your edits are still here; please try again.');
+    } catch {
+      setSaveError('Your plan could not be saved. Your edits are still here; please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const formatRest = (
@@ -156,24 +209,24 @@ export default function WorkoutBuilder({
 
   const canSave =
     planName.trim().length > 0 &&
-    selectedDays.length > 0 &&
     draftExercises.length > 0;
 
   return (
-    <View>
+    <View pointerEvents={isSaving ? 'none' : 'auto'}>
       <View style={styles.header}>
         <View style={{ flex: 1 }}>
           <Text style={styles.eyebrow}>
-            NEW WORKOUT
+            {initialPlan ? 'EDIT WORKOUT' : 'NEW WORKOUT'}
           </Text>
 
           <Text style={styles.title}>
-            Build a Workout
+            {initialPlan ? 'Edit Workout Plan' : 'Build a Workout'}
           </Text>
         </View>
 
         <Pressable
-          onPress={onCancel}
+          onPress={cancelEditing}
+          disabled={isSaving}
         >
           <Text style={styles.cancelText}>
             Cancel
@@ -202,7 +255,7 @@ export default function WorkoutBuilder({
             { marginTop: 18 },
           ]}
         >
-          Days of the week
+          Days of the week (optional)
         </Text>
 
         <View style={styles.dayWrap}>
@@ -235,6 +288,7 @@ export default function WorkoutBuilder({
             );
           })}
         </View>
+        <Text style={styles.scheduleHint}>Leave all days unselected to use this plan any day.</Text>
       </View>
 
       <Text style={styles.sectionTitle}>
@@ -248,8 +302,7 @@ export default function WorkoutBuilder({
           </Text>
 
           <Text style={styles.emptyText}>
-            Choose exercises from the
-            library below.
+            Tap Add exercise to choose from the library or create your own.
           </Text>
         </View>
       ) : (
@@ -298,6 +351,23 @@ export default function WorkoutBuilder({
                       exercise.restSeconds
                     )}
                   </Text>
+                  <View style={styles.exerciseControls}>
+                    <Pressable onPress={() => updateExercise(exercise.id, { targetSets: String(Math.max(1, Number(exercise.targetSets) - 1)) })} style={styles.controlButton} accessibilityLabel={`Decrease sets for ${exercise.name}`}><Text style={styles.controlText}>−</Text></Pressable>
+                    <Text style={styles.controlLabel}>{exercise.targetSets} sets</Text>
+                    <Pressable onPress={() => updateExercise(exercise.id, { targetSets: String(Math.min(99, Number(exercise.targetSets) + 1)) })} style={styles.controlButton} accessibilityLabel={`Increase sets for ${exercise.name}`}><Text style={styles.controlText}>+</Text></Pressable>
+                    {exercise.targetReps ? <>
+                      <Pressable onPress={() => updateExercise(exercise.id, { targetReps: String(Math.max(1, Number(exercise.targetReps) - 1)) })} style={styles.controlButton} accessibilityLabel={`Decrease reps for ${exercise.name}`}><Text style={styles.controlText}>−</Text></Pressable>
+                      <Text style={styles.controlLabel}>{exercise.targetReps} reps</Text>
+                      <Pressable onPress={() => updateExercise(exercise.id, { targetReps: String(Math.min(99, Number(exercise.targetReps) + 1)) })} style={styles.controlButton} accessibilityLabel={`Increase reps for ${exercise.name}`}><Text style={styles.controlText}>+</Text></Pressable>
+                    </> : null}
+                  </View>
+                  <View style={styles.exerciseControls}>
+                    <Pressable onPress={() => updateExercise(exercise.id, { restSeconds: Math.max(0, exercise.restSeconds - 15) })} style={styles.controlButton} accessibilityLabel={`Decrease rest for ${exercise.name}`}><Text style={styles.controlText}>−</Text></Pressable>
+                    <Text style={styles.controlLabel}>{formatRest(exercise.restSeconds)}</Text>
+                    <Pressable onPress={() => updateExercise(exercise.id, { restSeconds: Math.min(600, exercise.restSeconds + 15) })} style={styles.controlButton} accessibilityLabel={`Increase rest for ${exercise.name}`}><Text style={styles.controlText}>+</Text></Pressable>
+                    <Pressable onPress={() => moveExercise(index, -1)} disabled={index === 0} style={styles.controlButton} accessibilityLabel={`Move ${exercise.name} up`}><Text style={styles.controlText}>↑</Text></Pressable>
+                    <Pressable onPress={() => moveExercise(index, 1)} disabled={index === draftExercises.length - 1} style={styles.controlButton} accessibilityLabel={`Move ${exercise.name} down`}><Text style={styles.controlText}>↓</Text></Pressable>
+                  </View>
                 </View>
 
                 <Pressable
@@ -321,25 +391,29 @@ export default function WorkoutBuilder({
         </View>
       )}
 
-      <ExerciseLibrary
+      <Pressable accessibilityRole="button" accessibilityState={{ expanded: libraryOpen }} style={styles.addExerciseButton} onPress={() => setLibraryOpen((current) => !current)}>
+        <Text style={styles.controlLabel}>{libraryOpen ? 'Close exercise picker' : '+ Add exercise'}</Text>
+      </Pressable>
+      {libraryOpen ? <ExerciseLibrary
         onSelectExercise={
           addExerciseFromLibrary
         }
-      />
+      /> : null}
 
+      {saveError ? <Text accessibilityRole="alert" style={styles.saveError}>{saveError}</Text> : null}
       <Pressable
         style={[
           styles.saveButton,
-          !canSave &&
+          (!canSave || isSaving) &&
             styles.saveButtonDisabled,
         ]}
         onPress={saveWorkout}
-        disabled={!canSave}
+        disabled={!canSave || isSaving}
       >
         <Text
           style={styles.saveButtonText}
         >
-          Save Workout Plan
+          {isSaving ? 'Saving…' : initialPlan ? 'Save Changes' : 'Save Workout Plan'}
         </Text>
       </Pressable>
     </View>
@@ -490,6 +564,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.muted,
   },
+  exerciseControls: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 8 },
+  controlButton: { minWidth: 44, minHeight: 44, borderRadius: 8, backgroundColor: colors.soft2, alignItems: 'center', justifyContent: 'center' },
+  scheduleHint: { color: colors.muted, fontSize: 12, marginTop: 10, lineHeight: 18 },
+  addExerciseButton: { backgroundColor: colors.surface, borderRadius: 12, minHeight: 44, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  saveError: { color: colors.text, marginVertical: 12, lineHeight: 20 },
+  controlText: { color: colors.text, fontWeight: '900', fontSize: 16 },
+  controlLabel: { color: colors.muted, fontWeight: '800', fontSize: 12 },
 
   removeText: {
     color: colors.lightMuted,

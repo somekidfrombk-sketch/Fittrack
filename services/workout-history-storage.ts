@@ -6,6 +6,23 @@ import { WorkoutHistoryEntry } from '../types/workoutHistory';
 const WORKOUT_HISTORY_KEY =
   'fittrack_workout_history';
 
+export function updateWorkoutHistory(
+  profileId: string,
+  update: (history: WorkoutHistoryEntry[]) => WorkoutHistoryEntry[]
+) {
+  if (!profileId) throw new Error('A profile is required to update workout history.');
+  return withStorageLock(WORKOUT_HISTORY_KEY, async () => {
+    const all = await loadAllWorkoutHistory();
+    const current = all.filter((entry) => entry.profileId === profileId);
+    const next = update(current);
+    await AsyncStorage.setItem(WORKOUT_HISTORY_KEY, JSON.stringify([
+      ...next,
+      ...all.filter((entry) => entry.profileId !== profileId),
+    ]));
+    return next;
+  });
+}
+
 async function loadAllWorkoutHistory(): Promise<
   WorkoutHistoryEntry[]
 > {

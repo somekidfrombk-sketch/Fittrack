@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
     Pressable,
     StyleSheet,
@@ -59,6 +60,8 @@ export default function WorkoutHistory({
   onUseAsTemplate,
   onSaveAsTemplate,
 }: Props) {
+  const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null);
+
   return (
     <View>
       <View style={styles.header}>
@@ -92,7 +95,13 @@ export default function WorkoutHistory({
             key={entry.id}
             style={styles.card}
           >
-            <View style={styles.cardHeader}>
+            <Pressable
+              style={styles.cardHeader}
+              onPress={() => setExpandedEntryId((current) => current === entry.id ? null : entry.id)}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: expandedEntryId === entry.id }}
+              accessibilityLabel={`${formatWorkoutDate(entry.date)}, ${entry.exercises.length} exercises, ${entry.completedSets} completed sets. ${expandedEntryId === entry.id ? 'Hide' : 'Show'} workout details`}
+            >
               <View style={{ flex: 1 }}>
                 <Text style={styles.date}>
                   {formatWorkoutDate(entry.date)}
@@ -104,9 +113,23 @@ export default function WorkoutHistory({
                   {entry.exercises.length === 1 ? '' : 's'}
                   {' • '}
                   {entry.completedSets} completed sets
+                  {' • '}
+                  {formatDuration(entry.durationSeconds)}
                 </Text>
               </View>
+              <Text style={styles.expandArrow}>{expandedEntryId === entry.id ? '⌃' : '⌄'}</Text>
+            </Pressable>
 
+            <Pressable
+              onPress={() => onDeleteEntry(entry.id)}
+              accessibilityRole="button"
+              accessibilityLabel={`Delete workout from ${formatWorkoutDate(entry.date)}`}
+              style={styles.deleteButton}
+            >
+              <Text style={styles.deleteText}>Delete workout</Text>
+            </Pressable>
+
+            {expandedEntryId === entry.id ? <>
               <View style={styles.cardActions}>
                 <Pressable accessibilityRole="button" onPress={() => onUseAsTemplate(entry)} style={styles.templateButton}>
                   <Text style={styles.templateButtonText}>Use as template</Text>
@@ -114,11 +137,7 @@ export default function WorkoutHistory({
                 <Pressable accessibilityRole="button" onPress={() => onSaveAsTemplate(entry)} style={styles.saveTemplateButton}>
                   <Text style={styles.saveTemplateButtonText}>Save as template</Text>
                 </Pressable>
-                <Pressable onPress={() => onDeleteEntry(entry.id)}>
-                  <Text style={styles.deleteText}>Delete</Text>
-                </Pressable>
               </View>
-            </View>
 
             <View style={styles.statsRow}>
               <View style={styles.stat}>
@@ -202,6 +221,7 @@ export default function WorkoutHistory({
                 </View>
               ))}
             </View>
+            </> : null}
           </View>
         ))
       )}
@@ -259,7 +279,9 @@ const styles = StyleSheet.create({
     gap: 12,
   },
 
-  cardActions: { alignItems: 'flex-end', gap: 10 },
+  cardActions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginTop: 14 },
+  expandArrow: { color: colors.muted, fontSize: 22, fontWeight: '800' },
+  deleteButton: { alignSelf: 'flex-start', marginTop: 10, paddingVertical: 5 },
   templateButton: { backgroundColor: colors.text, borderRadius: 10, paddingHorizontal: 11, paddingVertical: 9 },
   templateButtonText: { color: colors.surface, fontSize: 11, fontWeight: '900' },
   saveTemplateButton: { backgroundColor: colors.soft, borderRadius: 10, paddingHorizontal: 11, paddingVertical: 9 },

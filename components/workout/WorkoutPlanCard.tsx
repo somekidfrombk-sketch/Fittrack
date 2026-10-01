@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
     Pressable,
     StyleSheet,
@@ -13,6 +14,7 @@ type Props = {
   plan: WorkoutPlan;
   onStart: () => void;
   onDelete?: () => void;
+  onEdit?: () => void;
   onSave?: () => void;
   saved?: boolean;
   getExerciseRecency?: (
@@ -43,10 +45,17 @@ export default function WorkoutPlanCard({
   plan,
   onStart,
   onDelete,
+  onEdit,
   onSave,
   saved = false,
   getExerciseRecency,
 }: Props) {
+  const [showAllExercises, setShowAllExercises] = useState(false);
+  const hasMoreExercises = plan.exercises.length > 3;
+  const visibleExercises = showAllExercises
+    ? plan.exercises
+    : plan.exercises.slice(0, 3);
+
   return (
     <View style={styles.card}>
       <View style={styles.header}>
@@ -60,9 +69,14 @@ export default function WorkoutPlanCard({
           </Text>
         </View>
 
-        {onDelete ? <Pressable onPress={onDelete}>
-          <Text style={styles.deleteText}>Delete</Text>
-        </Pressable> : null}
+        <View style={styles.headerActions}>
+          {onEdit ? <Pressable onPress={onEdit} accessibilityRole="button" accessibilityLabel={`Edit ${plan.name}`}>
+            <Text style={styles.editText}>Edit</Text>
+          </Pressable> : null}
+          {onDelete ? <Pressable onPress={onDelete} accessibilityRole="button" accessibilityLabel={`Delete ${plan.name}`}>
+            <Text style={styles.deleteText}>Delete</Text>
+          </Pressable> : null}
+        </View>
       </View>
 
       <Text style={styles.summary}>
@@ -71,7 +85,7 @@ export default function WorkoutPlanCard({
         {plan.exercises.length === 1 ? '' : 's'}
       </Text>
 
-      {plan.exercises.map((exercise, index) => {
+      {visibleExercises.map((exercise, index) => {
         const recency = getExerciseRecency?.(exercise.name);
 
         return (
@@ -107,6 +121,21 @@ export default function WorkoutPlanCard({
         );
       })}
 
+      {hasMoreExercises ? (
+        <Pressable
+          onPress={() => setShowAllExercises((current) => !current)}
+          accessibilityRole="button"
+          accessibilityLabel={showAllExercises ? `Show fewer exercises in ${plan.name}` : `Show all exercises in ${plan.name}`}
+          style={styles.showMoreButton}
+        >
+          <Text style={styles.showMoreText}>
+            {showAllExercises
+              ? 'Show less'
+              : `Show all ${plan.exercises.length} exercises`}
+          </Text>
+        </Pressable>
+      ) : null}
+
       <Pressable
         style={styles.startButton}
         onPress={onStart}
@@ -139,6 +168,8 @@ const styles = StyleSheet.create({
   headerInfo: {
     flex: 1,
   },
+  headerActions: { flexDirection: 'row', gap: 16 },
+  editText: { color: colors.text, fontSize: 12, fontWeight: '800' },
 
   name: {
     fontSize: 18,
@@ -220,6 +251,8 @@ const styles = StyleSheet.create({
     color: colors.surface,
     fontWeight: '900',
   },
+  showMoreButton: { marginTop: 14, alignSelf: 'flex-start', paddingVertical: 6 },
+  showMoreText: { color: colors.text, fontSize: 12, fontWeight: '900' },
   saveButton: { marginTop: 9, paddingVertical: 12, borderRadius: 12, alignItems: 'center', backgroundColor: colors.soft },
   savedButton: { opacity: 0.6 },
   saveButtonText: { color: colors.text, fontWeight: '900' },

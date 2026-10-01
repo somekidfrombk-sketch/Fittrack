@@ -22,3 +22,12 @@ export function saveWorkoutPlans(profileId: string, plans: WorkoutPlan[]) {
     await AsyncStorage.setItem(key(profileId), JSON.stringify(plans));
   });
 }
+
+// Read inside the lock so simultaneous edits/deletions use the latest plans.
+export function updateWorkoutPlans(profileId: string, update: (plans: WorkoutPlan[]) => WorkoutPlan[]) {
+  return withStorageLock(key(profileId), async () => {
+    const next = update(await readWorkoutPlans(profileId));
+    await AsyncStorage.setItem(key(profileId), JSON.stringify(next));
+    return next;
+  });
+}

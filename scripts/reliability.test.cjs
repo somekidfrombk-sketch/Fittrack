@@ -35,6 +35,48 @@ function harness() {
   return { data, load, failWrite() { failNextWrite = true; } };
 }
 
+test('overlapping workout history deletes and finishes retain the latest data and other profiles', async () => {
+  const h = harness();
+  const history = h.load('services/workout-history-storage.ts');
+  await history.saveWorkoutHistory('a', ['one', 'two', 'keep'].map(id => ({ id, profileId: 'a' })));
+  await history.saveWorkoutHistory('b', [{ id: 'one', profileId: 'b' }]);
+  await Promise.all([
+    history.updateWorkoutHistory('a', entries => entries.filter(entry => entry.id !== 'one')),
+    history.updateWorkoutHistory('a', entries => entries.filter(entry => entry.id !== 'two')),
+    history.updateWorkoutHistory('a', entries => [{ id: 'new', profileId: 'a' }, ...entries]),
+  ]);
+  assert.deepEqual((await history.loadWorkoutHistory('a')).map(entry => entry.id), ['new', 'keep']);
+  assert.deepEqual((await history.loadWorkoutHistory('b')).map(entry => entry.id), ['one']);
+  h.failWrite();
+  await assert.rejects(history.updateWorkoutHistory('a', () => []), /disk unavailable/);
+  assert.equal((await history.loadWorkoutHistory('a')).length, 2);
+  h.data.set('fittrack_workout_history', 'broken');
+  await assert.rejects(history.updateWorkoutHistory('a', () => []));
+  assert.equal(h.data.get('fittrack_workout_history'), 'broken');
+});
+
+test('overlapping plan edits and deletes preserve unrelated plans and stored metadata', async () => {
+  const h = harness();
+  const plans = h.load('services/workout-plan-storage.ts');
+  await plans.saveWorkoutPlans('a', [
+    { id: 'edit', name: 'Old name', days: [], starterId: 'starter', exercises: [{ id: 'custom', muscleGroups: ['Chest', 'Back'] }] },
+    { id: 'delete', name: 'Delete me', days: [], exercises: [] },
+  ]);
+  await Promise.all([
+    plans.updateWorkoutPlans('a', current => current.map(plan => plan.id === 'edit' ? { ...plan, name: 'New name' } : plan)),
+    plans.updateWorkoutPlans('a', current => current.filter(plan => plan.id !== 'delete')),
+    plans.updateWorkoutPlans('a', current => [...current, { id: 'new', name: 'New plan', days: [], exercises: [] }]),
+  ]);
+  const saved = await plans.loadWorkoutPlans('a');
+  assert.deepEqual(saved.map(plan => plan.id), ['edit', 'new']);
+  assert.equal(saved[0].name, 'New name');
+  assert.equal(saved[0].starterId, 'starter');
+  assert.deepEqual(saved[0].exercises[0].muscleGroups, ['Chest', 'Back']);
+  h.failWrite();
+  await assert.rejects(plans.updateWorkoutPlans('a', () => []), /disk unavailable/);
+  assert.deepEqual(await plans.loadWorkoutPlans('a'), saved);
+});
+
 test('concurrent food saves retain every entry and profile', async () => {
   const h = harness();
   const food = h.load('services/food-log-storage.ts');
