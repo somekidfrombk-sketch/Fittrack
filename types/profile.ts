@@ -18,6 +18,7 @@ export type LossRate =
   | '2';
 
 export type ProfileData = {
+  weightEntries?: { id: string; date: string; weightLb: number }[];
   id: string;
   name: string;
   avatarUri: string;

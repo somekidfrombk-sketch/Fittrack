@@ -86,6 +86,9 @@ const machines: MachineDefinition[] = [
   { name: 'Iso-Lateral Shoulder Press', target: 'shoulders', bodyPart: 'shoulders', family: 'MTS' },
   { name: 'Iso-Lateral Triceps Extension', target: 'triceps', bodyPart: 'upper arms', family: 'MTS' },
   { name: 'Abdominal Crunch', target: 'abdominals', bodyPart: 'core', family: 'MTS' },
+  // Append new machines so index-based IDs of existing exercises stay stable.
+  { name: 'Iso-Lateral T-Bar Row', target: 'back', bodyPart: 'back', family: 'Plate-Loaded' },
+  { name: 'Reverse V-Squat', target: 'quadriceps and glutes', bodyPart: 'lower body', family: 'Plate-Loaded' },
 ];
 
 export const hammerStrengthExercises: ExerciseRecord[] = machines.map(

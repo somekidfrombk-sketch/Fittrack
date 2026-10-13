@@ -6,7 +6,7 @@ import { colors } from '../../constants/theme';
 import { addWorkoutPhoto, loadWorkoutPhotos, removeWorkoutPhoto, WorkoutPhoto } from '../../services/workout-photo-storage';
 import { workoutPhotoUri } from '../../services/workout-photo-files';
 
-export default function WorkoutPhotos({ profileId, workoutId }: { profileId: string; workoutId: string }) {
+export default function WorkoutPhotos({ profileId, workoutId, onPhotosChange }: { profileId: string; workoutId: string; onPhotosChange?: () => void }) {
   const [photos, setPhotos] = useState<WorkoutPhoto[]>([]);
   const [selected, setSelected] = useState<WorkoutPhoto | null>(null);
   const [busy, setBusy] = useState(false);
@@ -44,6 +44,7 @@ export default function WorkoutPhotos({ profileId, workoutId }: { profileId: str
         : await ImagePicker.launchImageLibraryAsync(options);
       if (result.canceled || !result.assets[0]) return;
       setPhotos(await addWorkoutPhoto(profileId, workoutId, result.assets[0]));
+      onPhotosChange?.();
     } catch {
       setError('Photo could not be saved. Check available storage and try again.');
     } finally {
@@ -59,6 +60,7 @@ export default function WorkoutPhotos({ profileId, workoutId }: { profileId: str
       setBusy(true);
       try {
         setPhotos(await removeWorkoutPhoto(profileId, workoutId, photo.id));
+        onPhotosChange?.();
         setSelected(null);
       } catch { setError('Photo could not be removed. Please try again.'); }
       finally { locked.current = false; setBusy(false); }

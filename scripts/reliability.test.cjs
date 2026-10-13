@@ -77,6 +77,44 @@ test('overlapping plan edits and deletes preserve unrelated plans and stored met
   assert.deepEqual(await plans.loadWorkoutPlans('a'), saved);
 });
 
+test('editing workout time keeps its identity and exercises while updating estimated calories', () => {
+  const { editWorkoutTime } = harness().load('utils/workout-time.ts');
+  const original = {
+    id: 'session-1', profileId: 'a', date: '2026-10-01T16:00:00.000Z',
+    durationSeconds: 1800, caloriesBurned: 100, weightLbAtWorkout: 180,
+    intensity: 'moderate', exercises: [{ id: 'exercise-1', name: 'Row', sets: [] }],
+  };
+  const updated = editWorkoutTime(original, '2026-10-02', '14:30', '45');
+  assert.equal(updated.id, original.id);
+  assert.equal(updated.durationSeconds, 2700);
+  assert.deepEqual(updated.exercises, original.exercises);
+  assert.notEqual(updated.caloriesBurned, original.caloriesBurned);
+  assert.equal(new Date(updated.date).getHours(), 14);
+  for (const [day, time, duration] of [
+    ['2026-02-30', '14:30', '45'], ['2026-10-02', '25:00', '45'], ['2026-10-02', '14:30', '0'],
+  ]) assert.throws(() => editWorkoutTime(original, day, time, duration));
+  assert.equal(original.durationSeconds, 1800);
+});
+
+test('body weight logs persist with the current weight and preserve existing profile fields', async () => {
+  const h = harness();
+  const profiles = h.load('services/profile-storage.ts');
+  h.data.set('fittrack_user_profile', JSON.stringify({ id: 'a', name: 'Alex', goalWeight: '170', weight: '185' }));
+  await Promise.all([profiles.logBodyWeight('a', 184.5), profiles.logBodyWeight('a', 183)]);
+  const saved = await profiles.loadProfile();
+  assert.equal(saved.weight, '183');
+  assert.equal(saved.name, 'Alex');
+  assert.equal(saved.goalWeight, '170');
+  assert.deepEqual(saved.weightEntries.map(entry => entry.weightLb), [183, 184.5]);
+  for (const weight of [0, -1, NaN, Infinity]) await assert.rejects(profiles.logBodyWeight('a', weight));
+  await assert.rejects(profiles.logBodyWeight('other', 190), /profile changed/);
+  h.failWrite();
+  await assert.rejects(profiles.logBodyWeight('a', 182), /disk unavailable/);
+  assert.deepEqual(await profiles.loadProfile(), saved);
+  await profiles.saveProfile({ ...saved, name: 'Updated name', weightEntries: [] });
+  assert.deepEqual((await profiles.loadProfile()).weightEntries, saved.weightEntries);
+});
+
 test('concurrent food saves retain every entry and profile', async () => {
   const h = harness();
   const food = h.load('services/food-log-storage.ts');

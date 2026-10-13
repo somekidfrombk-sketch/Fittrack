@@ -10,7 +10,7 @@ import { colors } from '../../constants/theme';
 import { WorkoutHistoryEntry } from '../../types/workoutHistory';
 import { getExerciseMeasurement } from './exerciseMeasurement';
 
-function formatSet(exercise: WorkoutHistoryEntry['exercises'][number], set: WorkoutHistoryEntry['exercises'][number]['sets'][number]) {
+export function formatWorkoutSet(exercise: WorkoutHistoryEntry['exercises'][number], set: WorkoutHistoryEntry['exercises'][number]['sets'][number]) {
   const measurement = getExerciseMeasurement(exercise.name, exercise.trackingMethod);
   if (measurement.kind === 'none') return 'No measurement';
   if (measurement.kind === 'duration') return `${set.reps || '0'} sec`;
@@ -212,7 +212,7 @@ export default function WorkoutHistory({
                       ]}
                     >
                       Set {setIndex + 1}:{' '}
-                      {formatSet(exercise, set)}
+                      {formatWorkoutSet(exercise, set)}
                       {set.completed
                         ? ''
                         : ' • not completed'}

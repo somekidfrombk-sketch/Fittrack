@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ProfileData } from '../types/profile';
+import { emptyProfile, ProfileData } from '../types/profile';
 import { withStorageLock } from './storage-lock';
 
 const PROFILE_STORAGE_KEY = 'fittrack_user_profile';
@@ -44,6 +44,25 @@ export function loadProfile() {
   return withStorageLock(PROFILE_STORAGE_KEY, readProfile);
 }
 
+export function logBodyWeight(profileId: string, weightLb: number) {
+  return withStorageLock(PROFILE_STORAGE_KEY, async () => {
+    if (!Number.isFinite(weightLb) || weightLb <= 0) throw new Error('Enter a weight greater than zero.');
+    const current = await readProfile();
+    const activeId = current?.id || await resolveProfileId();
+    if (!profileId || activeId !== profileId) throw new Error('Your profile changed. Reopen Progress and try again.');
+    if (current?.weightEntries !== undefined && !Array.isArray(current.weightEntries)) {
+      throw new Error('Weight history could not be read. Original data was preserved.');
+    }
+    const entry = { id: `weight-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`, date: new Date().toISOString(), weightLb };
+    const saved: ProfileData = {
+      ...emptyProfile, ...current, id: activeId, weight: String(weightLb),
+      weightEntries: [entry, ...(current?.weightEntries ?? [])],
+    };
+    await AsyncStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(saved));
+    return saved;
+  });
+}
+
 export function getOrCreateProfileId() {
   return withStorageLock(PROFILE_STORAGE_KEY, resolveProfileId);
 }
@@ -51,7 +70,12 @@ export function getOrCreateProfileId() {
 export function saveProfile(profile: ProfileData) {
   return withStorageLock(PROFILE_STORAGE_KEY, async () => {
     const profileId = profile.id || await resolveProfileId();
-    const saved = { ...profile, id: profileId };
+    const current = await readProfile();
+    const saved = {
+      ...profile, id: profileId,
+      ...(current?.id === profileId && current.weightEntries !== undefined
+        ? { weightEntries: current.weightEntries } : {}),
+    };
     await AsyncStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(saved));
     await AsyncStorage.setItem(ACTIVE_PROFILE_ID_KEY, profileId);
     return saved;

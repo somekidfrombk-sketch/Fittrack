@@ -1,21 +1,28 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors } from '../../constants/theme';
 import { getOrCreateProfileId } from '../../services/profile-storage';
-import { loadWorkoutHistory } from '../../services/workout-history-storage';
+import { loadWorkoutHistory, updateWorkoutHistory } from '../../services/workout-history-storage';
 import { loadRunHistory } from '../../services/run-storage';
 import { RunEntry } from '../../types/run';
 import { WorkoutHistoryEntry } from '../../types/workoutHistory';
 import { localDateKey } from '../../utils/date';
 import { calculateProgressCalorieAverages } from '../../utils/progress-calories';
 import WorkoutPhotos from './WorkoutPhotos';
+import BodyWeightLog from './BodyWeightLog';
+import ProgressPhotoGallery from './ProgressPhotoGallery';
+import WorkoutTimeEditor from './WorkoutTimeEditor';
+import { formatWorkoutSet } from '../workout/WorkoutHistory';
 
 export default function WorkoutProgressScreen() {
   const [history, setHistory] = useState<WorkoutHistoryEntry[]>([]);
   const [activities, setActivities] = useState<RunEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [photoRevision, setPhotoRevision] = useState(0);
   useFocusEffect(useCallback(() => {
     let active = true;
     setError('');
@@ -55,6 +62,15 @@ export default function WorkoutProgressScreen() {
     [activities, history]
   );
 
+  const saveWorkoutTime = async (updatedEntry: WorkoutHistoryEntry) => {
+    const updated = await updateWorkoutHistory(updatedEntry.profileId, (current) => {
+      if (!current.some(entry => entry.id === updatedEntry.id)) throw new Error('This workout is no longer in history. Reopen Progress and try again.');
+      return current.map(entry => entry.id === updatedEntry.id ? updatedEntry : entry);
+    });
+    setHistory([...updated].sort((a, b) => b.date.localeCompare(a.date)));
+    setEditingId(null);
+  };
+
   return <FlatList
     style={styles.screen}
     contentContainerStyle={styles.container}
@@ -63,10 +79,15 @@ export default function WorkoutProgressScreen() {
     initialNumToRender={3}
     maxToRenderPerBatch={3}
     windowSize={5}
+    extraData={expandedId}
+    keyboardShouldPersistTaps="handled"
+    automaticallyAdjustKeyboardInsets
     ListHeaderComponent={<View>
       <Text style={styles.brand}>FITTRACK</Text>
       <Text style={styles.title}>Progress</Text>
-      <Text style={styles.subtitle}>Your workouts, lifting results, and photos</Text>
+      <Text style={styles.subtitle}>Your workouts, weight, and progress photos</Text>
+      <BodyWeightLog />
+      <ProgressPhotoGallery history={history} revision={photoRevision} />
       <View style={styles.dashboard}>
         <View style={styles.dashboardCard}>
           <Text style={styles.dashboardLabel}>THIS WEEK</Text>
@@ -88,19 +109,26 @@ export default function WorkoutProgressScreen() {
       <Text style={styles.date}>{new Date(day.workouts[0].date).toLocaleDateString(undefined, { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' })}</Text>
       <Text style={styles.dayTotal}>{Math.round(day.workouts.reduce((sum, entry) => sum + entry.totalVolume, 0)).toLocaleString()} lb total volume that day</Text>
       {day.workouts.map((entry) => <View key={entry.id} style={styles.card}>
+        <Pressable accessibilityRole="button" accessibilityState={{ expanded: expandedId === entry.id }} onPress={() => setExpandedId((current) => current === entry.id ? null : entry.id)}>
         <Text style={styles.workoutTitle}>Workout · {new Date(entry.date).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</Text>
-        <Text style={styles.body}>{Math.round(entry.durationSeconds / 60)} min · {entry.completedSets} completed sets</Text>
+        <Text style={styles.body}>{Math.round(entry.durationSeconds / 60)} min · {entry.exercises.length} exercises · {entry.completedSets} completed sets</Text>
+        <Text style={styles.toggle}>{expandedId === entry.id ? 'Hide session details ⌃' : 'View session details ⌄'}</Text>
+        </Pressable>
+        {expandedId === entry.id && <>
         <Text style={styles.volume}>{Math.round(entry.totalVolume).toLocaleString()} lb lifted</Text>
         <Text style={styles.caption}>Total volume = weight × reps across completed sets</Text>
         {entry.weightLbAtWorkout !== undefined && <Text style={styles.body}>Body weight: {entry.weightLbAtWorkout} lb</Text>}
         {entry.caloriesBurned !== undefined && <Text style={styles.body}>Estimated exercise calories: {entry.caloriesBurned} kcal</Text>}
+        {editingId === entry.id ? <WorkoutTimeEditor entry={entry} onSave={saveWorkoutTime} onCancel={() => setEditingId(null)} /> : <Pressable accessibilityRole="button" onPress={() => setEditingId(entry.id)} style={styles.editTimeButton}><Text style={styles.editTimeText}>Edit workout time</Text></Pressable>}
         {entry.exercises.map((exercise) => <View key={exercise.id} style={styles.exercise}>
           <Text style={styles.exerciseName}>{exercise.name}</Text>
+          {!!exercise.comment && <Text style={styles.body}>{exercise.comment}</Text>}
           {exercise.sets.map((set, index) => <Text key={set.id} style={[styles.body, !set.completed && styles.incomplete]}>
-            Set {index + 1}: {set.weight || '0'} lb × {set.reps || '0'} reps{set.completed ? '' : ' · incomplete'}
+            Set {index + 1}: {formatWorkoutSet(exercise, set)}{set.completed ? '' : ' · incomplete'}
           </Text>)}
         </View>)}
-        <WorkoutPhotos profileId={entry.profileId} workoutId={entry.id} />
+        <WorkoutPhotos profileId={entry.profileId} workoutId={entry.id} onPhotosChange={() => setPhotoRevision(value => value + 1)} />
+        </>}
       </View>)}
     </View>}
   />;
@@ -120,6 +148,9 @@ const styles = StyleSheet.create({
   date: { fontSize: 19, fontWeight: '800', color: colors.text }, dayTotal: { fontSize: 13, color: colors.muted, marginTop: 4, marginBottom: 12 },
   card: { backgroundColor: colors.surface, borderRadius: 20, padding: 18, marginBottom: 20 },
   workoutTitle: { fontSize: 17, fontWeight: '800', color: colors.text }, body: { fontSize: 13, color: colors.muted, marginTop: 5, lineHeight: 20 },
+  toggle: { color: colors.text, fontSize: 12, fontWeight: '800', marginTop: 10, paddingVertical: 6 },
+  editTimeButton: { alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center', marginTop: 8 },
+  editTimeText: { color: colors.text, fontWeight: '800', fontSize: 13 },
   volume: { fontSize: 24, fontWeight: '900', color: colors.text, marginTop: 12 }, caption: { fontSize: 11, color: colors.muted, marginTop: 3 },
   exercise: { borderTopWidth: 1, borderTopColor: colors.soft, marginTop: 14, paddingTop: 10 },
   exerciseName: { fontSize: 14, fontWeight: '800', color: colors.text }, incomplete: { opacity: 0.55 }, error: { color: '#B91C1C', marginBottom: 15 },
